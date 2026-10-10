@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.infi.agent.mapper.UserMapper">
+  <sql id="columns">id, username, password_hash, nickname, email, role, status, auth_version, gmt_create, gmt_modified</sql>
+  <sql id="search">
+    <if test="keyword != null and keyword != ''">
+      WHERE username LIKE CONCAT('%', #{keyword}, '%') OR nickname LIKE CONCAT('%', #{keyword}, '%')
+    </if>
+  </sql>
+  <select id="selectById" resultType="com.infi.agent.entity.UserDO">
+    SELECT <include refid="columns"/> FROM sys_user WHERE id = #{id}
+  </select>
+  <select id="selectByUsername" resultType="com.infi.agent.entity.UserDO">
+    SELECT <include refid="columns"/> FROM sys_user WHERE username = #{username}
+  </select>
+  <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+    INSERT INTO sys_user (username, password_hash, nickname, email, role, status, auth_version)
+    VALUES (#{username}, #{passwordHash}, #{nickname}, #{email}, #{role}, #{status}, #{authVersion})
+  </insert>
+  <update id="updateProfile">
+    UPDATE sys_user SET nickname = #{nickname}, email = #{email}, gmt_modified = CURRENT_TIMESTAMP WHERE id = #{id}
+  </update>
+  <update id="updatePassword">
+    UPDATE sys_user SET password_hash = #{newHash}, auth_version = auth_version + 1,
+      gmt_modified = CURRENT_TIMESTAMP WHERE id = #{id} AND password_hash = #{oldHash}
+  </update>
+  <update id="updateStatus">
+    UPDATE sys_user SET status = #{status}, auth_version = auth_version + 1,
+      gmt_modified = CURRENT_TIMESTAMP WHERE id = #{id} AND role = 'USER'
+  </update>
+  <select id="selectPage" resultType="com.infi.agent.entity.UserDO">
+    SELECT <include refid="columns"/> FROM sys_user <include refid="search"/>
+    ORDER BY id DESC LIMIT #{size} OFFSET #{offset}
+  </select>
+  <select id="count" resultType="long">SELECT COUNT(id) FROM sys_user <include refid="search"/></select>
+</mapper>

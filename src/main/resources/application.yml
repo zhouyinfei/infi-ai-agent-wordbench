@@ -1,0 +1,50 @@
+server:
+  port: 8126
+  error:
+    include-message: never
+    include-stacktrace: never
+spring:
+  application:
+    name: infi-ai-agent
+  profiles:
+    default: local
+  datasource:
+    # 本地隐私配置的备份模板：实际值在 application-local.yml 或环境变量中提供。
+    url: ${MYSQL_URL:jdbc:mysql://localhost:3306/infi_agent_it?useUnicode=true&characterEncoding=UTF-8&serverTimezone=Asia/Shanghai}
+    username: root
+    password: 123456
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: 0
+      timeout: 3s
+  jackson:
+    default-property-inclusion: non_null
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+app:
+  auth:
+    token-ttl: 8h
+    login-window: 15m
+    max-login-attempts: 10
+  bootstrap:
+    # 仅空用户表时可初始化管理员，无默认密码。
+    admin-username: ${BOOTSTRAP_ADMIN_USERNAME:}
+    admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:}
+  ai:
+    enabled: ${AI_ENABLED:false}
+    base-url: ${AI_BASE_URL:https://api.openai.com/v1}
+    model-name: ${AI_MODEL:}
+    # 隐私配置备份占位，实际密钥填入 application-local.yml 或环境变量。
+    api-key: ${AI_API_KEY:}
+    request-timeout: 30s
+  react:
+    max-iterations: 6
+    max-tool-calls: 10
+    max-repeated-calls: 2
+    task-timeout: 90s
