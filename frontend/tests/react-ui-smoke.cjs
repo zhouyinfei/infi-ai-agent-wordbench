@@ -20,6 +20,7 @@ const server = http.createServer((req, res) => {
     let runCount = 0;
     let configured = true;
     let success = true;
+    let usageMode = 'complete';
     const configuration = () => ({
       configured, modelName: 'self-test-model', maxIterations: 6, maxToolCalls: 10, taskTimeoutSeconds: 90,
       tools: [{ name: 'calculator', description: '计算器' }, { name: 'current_time', description: '当前时间' }],
@@ -30,7 +31,7 @@ const server = http.createServer((req, res) => {
       let data;
       if (endpoint === '/api/auth/login') data = { token: 'test-token', user: { id: 7, username: 'alice', nickname: '研究员', role: 'USER', status: 1 } };
       else if (endpoint === '/api/react/config') data = configuration();
-      else if (endpoint === '/api/react/runs') {
+      else if (endpoint === '/api/react/runs' || endpoint === '/api/plan-execute/runs') {
         runCount++;
         assert.deepEqual(Object.keys(request.postDataJSON()), ['goal']);
         assert.equal(request.headers().authorization, 'Bearer test-token');
@@ -44,6 +45,21 @@ const server = http.createServer((req, res) => {
             { sequence: 4, iteration: 2, type: 'TOOL', status: 'SUCCESS', toolName: 'calculator', arguments: { left: 384, operator: 'MULTIPLY', right: 3 }, observation: '1152', durationMs: 1 },
             { sequence: 5, iteration: 3, type: 'MODEL', status: 'SUCCESS', summary: '模型给出最终回答', durationMs: 150 },
           ],
+        };
+        if (endpoint === '/api/plan-execute/runs') {
+          data.modelCalls = 6;
+          data.steps = [
+            { sequence: 1, iteration: 0, type: 'PLAN', status: 'SUCCESS', summary: '执行计划', arguments: ['计算128加256', '把结果乘以3'], durationMs: 0 },
+            { sequence: 2, iteration: 1, type: 'STEP', status: 'SUCCESS', summary: '第一步完成', observation: '384', durationMs: 1 },
+            { sequence: 3, iteration: 2, type: 'STEP', status: 'SUCCESS', summary: '第二步完成', observation: '1152', durationMs: 1 },
+            { sequence: 4, iteration: 3, type: 'FINAL', status: 'SUCCESS', summary: '模型返回阶段结果', durationMs: 100 },
+          ];
+        }
+        data.tokenUsage = usageMode === 'none' ? null : {
+          inputTokens: 10 * data.modelCalls, outputTokens: 5 * data.modelCalls,
+          totalTokens: 15 * data.modelCalls,
+          reportedModelCalls: usageMode === 'partial' ? data.modelCalls - 1 : data.modelCalls,
+          complete: usageMode === 'complete',
         };
       } else if (endpoint === '/api/users/me') data = { id: 7, username: 'alice', nickname: '研究员', role: 'USER', status: 1 };
       await route.fulfill({ json: { code: 'OK', message: '操作成功', data } });
@@ -60,12 +76,33 @@ const server = http.createServer((req, res) => {
     await page.getByRole('heading', { name: '执行完成', exact: true }).waitFor();
     await page.getByText('128加256得到384，再乘以3，最终结果为1152。', { exact: true }).waitFor();
     assert.equal(runCount, 1);
+    await page.getByTestId('token-usage-status').filter({ hasText: '统计完整' }).waitFor();
+    assert.equal(await page.getByText('总 Token', { exact: true }).locator('xpath=following-sibling::dd[1]').textContent(), '45');
     assert.equal(await page.locator('.react-step').count(), 5);
     await page.screenshot({ path: 'docs/images/react-workbench-v1.png', fullPage: true });
     success = false;
     await page.getByRole('button', { name: '开始执行' }).click();
     await page.getByRole('heading', { name: '达到执行上限', exact: true }).waitFor();
     await page.getByText('达到模型迭代次数上限').waitFor();
+    success = true;
+    await page.getByRole('combobox').selectOption('PLAN_EXECUTE');
+    assert.equal(await page.locator('.react-step').count(), 0);
+    await page.getByRole('button', { name: '开始执行' }).click();
+    await page.getByRole('heading', { name: '执行计划', exact: true }).waitFor();
+    assert.equal(await page.locator('.plan-list li').count(), 2);
+    assert.equal(await page.locator('.plan-list .success').count(), 2);
+    await page.getByText('汇总回答', { exact: true }).waitFor();
+    assert.equal(await page.getByText('总 Token', { exact: true }).locator('xpath=following-sibling::dd[1]').textContent(), '90');
+    await page.screenshot({ path: 'docs/images/plan-execute-workbench-v1.png', fullPage: true });
+    usageMode = 'partial';
+    await page.getByRole('button', { name: '开始执行' }).click();
+    await page.getByTestId('token-usage-status').filter({ hasText: '部分统计' }).waitFor();
+    usageMode = 'none';
+    await page.getByRole('button', { name: '开始执行' }).click();
+    await page.getByTestId('token-usage-status').filter({ hasText: '未返回' }).waitFor();
+    assert.equal(await page.getByText('总 Token', { exact: true }).locator('xpath=following-sibling::dd[1]').textContent(), '未提供');
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
     configured = false;
     await page.getByRole('button', { name: '个人中心' }).click();
     await page.getByRole('button', { name: '会话工作台' }).click();
@@ -74,7 +111,7 @@ const server = http.createServer((req, res) => {
     await page.setViewportSize({ width: 390, height: 844 });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
     assert.deepEqual(errors, []);
-    console.log('ReAct browser smoke passed: authorized payload, success trace, budget stop, unconfigured model, mobile layout. API responses simulated.');
+    console.log('Agent browser smoke passed: ReAct/Plan-and-Execute, token totals, complete/partial/missing usage, budget stop, unconfigured model, mobile layout. API responses simulated.');
   } finally {
     await browser.close();
     await new Promise(resolve => server.close(resolve));

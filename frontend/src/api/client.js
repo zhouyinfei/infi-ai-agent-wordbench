@@ -52,3 +52,8 @@ export const reactApi = {
   configuration: () => request('/react/config'),
   run: (data) => request('/react/runs', { method: 'POST', body: JSON.stringify(data) }),
 };
+
+
+export const planExecuteApi = {
+  run: (data) => request('/plan-execute/runs', { method: 'POST', body: JSON.stringify(data) }),
+};

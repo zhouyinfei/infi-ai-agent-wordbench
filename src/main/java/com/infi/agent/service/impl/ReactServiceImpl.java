@@ -5,6 +5,7 @@ import com.infi.agent.config.AiModelProperties;
 import com.infi.agent.config.ReactProperties;
 import com.infi.agent.dto.ReactRunDTO;
 import com.infi.agent.react.model.ReactModelGateway;
+import com.infi.agent.react.model.TokenUsageTracker;
 import com.infi.agent.react.tool.ReactToolRegistry;
 import com.infi.agent.service.ReactService;
 import com.infi.agent.vo.ReactConfigVO;
@@ -94,6 +95,7 @@ public class ReactServiceImpl implements ReactService {
                 response = modelGateway.chat(ChatRequest.builder().messages(List.copyOf(messages))
                         .toolSpecifications(toolRegistry.specifications())
                         .maxOutputTokens(MAX_OUTPUT_TOKENS).build(), remaining);
+                state.tokenUsage.add(response == null ? null : response.tokenUsage());
             } catch (RuntimeException exception) {
                 state.steps.add(new ReactStepVO(state.steps.size() + 1, iteration, "MODEL", "ERROR",
                         "模型调用失败", null, null, null, elapsed(modelStarted)));
@@ -162,7 +164,7 @@ public class ReactServiceImpl implements ReactService {
         log.info("ReAct completed, userId={}, runId={}, status={}, modelCalls={}, toolCalls={}",
                 userId, state.runId, status, state.modelCalls, state.toolCalls);
         return new ReactRunVO(state.runId, status, answer, reason, state.modelCalls,
-                state.toolCalls, elapsed(state.started), List.copyOf(state.steps));
+                state.toolCalls, elapsed(state.started), List.copyOf(state.steps), state.tokenUsage.snapshot(state.modelCalls));
     }
 
     /**
@@ -179,6 +181,7 @@ public class ReactServiceImpl implements ReactService {
         private final String runId = UUID.randomUUID().toString();
         private final long started = System.nanoTime();
         private final List<ReactStepVO> steps = new ArrayList<>();
+        private final TokenUsageTracker tokenUsage = new TokenUsageTracker();
         private int modelCalls;
         private int toolCalls;
     }

@@ -16,6 +16,7 @@ import dev.langchain4j.data.message.ToolExecutionResultMessage;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.output.FinishReason;
+import dev.langchain4j.model.output.TokenUsage;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -55,6 +56,11 @@ class ReactServiceTest {
         assertThat(result.modelCalls()).isEqualTo(3);
         assertThat(result.toolCalls()).isEqualTo(2);
         assertThat(result.answer()).contains("1152");
+        assertThat(result.tokenUsage().inputTokens()).isEqualTo(30L);
+        assertThat(result.tokenUsage().outputTokens()).isEqualTo(15L);
+        assertThat(result.tokenUsage().totalTokens()).isEqualTo(45L);
+        assertThat(result.tokenUsage().reportedModelCalls()).isEqualTo(3);
+        assertThat(result.tokenUsage().complete()).isTrue();
         assertThat(gateway.requests.get(0).toolSpecifications()).extracting(specification -> specification.name())
                 .containsExactlyInAnyOrder("calculator", "current_time");
         assertThat(result.steps()).hasSize(5);
@@ -209,6 +215,25 @@ class ReactServiceTest {
         assertThat(trailing.success()).isFalse();
     }
 
+    @Test
+    void missingProviderUsageIsNotReportedAsZero() {
+        gateway.responses.add(ChatResponse.builder().aiMessage(AiMessage.from("直接回答")).build());
+        var result = service.execute(1L, goal());
+        assertThat(result.status()).isEqualTo("SUCCEEDED");
+        assertThat(result.tokenUsage().totalTokens()).isNull();
+        assertThat(result.tokenUsage().complete()).isFalse();
+    }
+
+    @Test
+    void knownUsageSurvivesBudgetTermination() {
+        properties.setMaxIterations(1);
+        gateway.enqueue(tool("one", "current_time", "{}"));
+        var result = service.execute(1L, goal());
+        assertThat(result.status()).isEqualTo("LIMIT_REACHED");
+        assertThat(result.tokenUsage().totalTokens()).isEqualTo(15L);
+        assertThat(result.tokenUsage().complete()).isTrue();
+    }
+
     private ReactRunDTO goal() {
         return new ReactRunDTO("完成测试任务");
     }
@@ -224,7 +249,7 @@ class ReactServiceTest {
         private RuntimeException failure;
 
         void enqueue(AiMessage message) {
-            responses.add(ChatResponse.builder().aiMessage(message).build());
+            responses.add(ChatResponse.builder().aiMessage(message).tokenUsage(new TokenUsage(10, 5, 15)).build());
         }
 
         @Override

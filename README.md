@@ -1,6 +1,6 @@
 # Infi AI Agent
 
-前后端分离的 AI Agent 平台，当前已实现用户系统与 ReAct 同步执行闭环。
+前后端分离的 AI Agent 平台，当前已实现用户系统、ReAct 与 Plan-and-Execute 同步执行。
 
 ## 界面设计预览
 
@@ -55,3 +55,11 @@ application.yml 保存普通配置及隐私项的环境变量占位备份。appl
 登录后打开“会话工作台”，可提交计算或当前时间任务并查看动作与观察轨迹。首先在 src/main/resources/application-local.yml 配置 app.ai 的 enabled、base-url、model-name、api-key；模型须支持工具调用。本轮仅接入一个 OpenAI 兼容模型，不提供默认模拟模式，未配置时明确提示。
 
 使用说明、接口、边界与自测见 [ReAct 使用说明](docs/ReAct使用说明.md)。
+
+
+## Plan-and-Execute
+
+会话工作台支持切换 ReAct 与 Plan-and-Execute。后者先生成计划，再按步骤自动调用工具，最后汇总结果；页面展示计划完成状态和实际执行轨迹，整次任务共用预算。详见 [Plan-and-Execute 使用说明](docs/Plan-and-Execute使用说明.md)。
+
+
+执行结果中的“本次执行”会显示模型服务返回的累计输入、输出和总 Token 用量。两种模式均统计所有模型调用；未返回用量时显示“未提供”，部分统计会标明覆盖次数，不估算实际账单。Token 统计回归后，65 项后端测试、6 项前端测试、生产构建及浏览器检查均通过。

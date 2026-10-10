@@ -1,6 +1,6 @@
 import { beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { request, saveToken, getToken, reactApi } from '../src/api/client.js';
+import { request, saveToken, getToken, planExecuteApi, reactApi } from '../src/api/client.js';
 
 const memory = new Map();
 let events;
@@ -56,4 +56,16 @@ test('missing model is a service error and does not erase login', async () => {
   await assert.rejects(reactApi.run({ goal: '计算' }), /模型尚未配置/);
   assert.equal(getToken(), 'react-token');
   assert.deepEqual(events, []);
+});
+
+
+test('Plan-and-Execute submits only goal to its authenticated endpoint', async () => {
+  saveToken('plan-token');
+  globalThis.fetch = async (url, options) => {
+    assert.equal(url, '/api/plan-execute/runs');
+    assert.equal(options.headers.Authorization, 'Bearer plan-token');
+    assert.deepEqual(JSON.parse(options.body), { goal: '先加再乘' });
+    return { ok: true, json: async () => ({ data: { status: 'SUCCEEDED', answer: '1152' } }) };
+  };
+  assert.equal((await planExecuteApi.run({ goal: '先加再乘' })).answer, '1152');
 });

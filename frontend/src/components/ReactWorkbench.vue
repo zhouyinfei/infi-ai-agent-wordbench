@@ -1,9 +1,14 @@
 <script setup>
-import { onMounted, ref } from 'vue';
-import { reactApi } from '../api/client';
+import { computed, onMounted, ref } from 'vue';
+import { planExecuteApi, reactApi } from '../api/client';
 
 const config = ref(null);
 const goal = ref('');
+const mode = ref('REACT');
+const modeLabel = computed(() => mode.value === 'REACT' ? 'ReAct' : 'Plan-and-Execute');
+const plan = computed(() => result.value?.steps.find(step => step.type === 'PLAN' && step.summary === '执行计划')?.arguments || []);
+const tokenCount = value => value == null ? '未提供' : value.toLocaleString();
+const stepLabels = { PLAN: '生成计划', MODEL: '模型判断', TOOL: '工具执行', STEP: '步骤完成', FINAL: '汇总回答' };
 const running = ref(false);
 const loading = ref(true);
 const error = ref('');
@@ -25,7 +30,8 @@ async function execute() {
   error.value = '';
   result.value = null;
   try {
-    result.value = await reactApi.run({ goal: goal.value });
+    const api = mode.value === 'REACT' ? reactApi : planExecuteApi;
+    result.value = await api.run({ goal: goal.value });
   } catch (exception) { error.value = exception.message; }
   finally { running.value = false; }
 }
@@ -34,7 +40,7 @@ onMounted(loadConfig);
 </script>
 
 <template>
-  <div class="page-heading"><div><span class="eyebrow">REACT AGENT</span><h1>会话工作台</h1><p class="muted">提交一个目标，让 Agent 使用工具逐步完成。</p></div><span class="badge">ReAct</span></div>
+  <div class="page-heading"><div><span class="eyebrow">AI AGENT</span><h1>会话工作台</h1><p class="muted">提交一个目标，让 Agent 使用工具逐步完成。</p></div><span class="badge">{{ modeLabel }}</span></div>
   <p v-if="error" class="error" role="alert">{{ error }}</p>
   <p v-if="loading" class="muted">正在读取执行配置…</p>
   <template v-else-if="config">
@@ -44,6 +50,8 @@ onMounted(loadConfig);
         <section class="card">
           <h2>任务目标</h2><p class="muted">每次执行独立处理，当前不保留跨任务对话。</p>
           <form @submit.prevent="execute">
+            <label class="mode-selector">执行模式<select v-model="mode" :disabled="running" @change="result = null"><option value="REACT">ReAct</option><option value="PLAN_EXECUTE">Plan-and-Execute</option></select></label>
+            <p v-if="mode === 'PLAN_EXECUTE'" class="muted">先生成计划，再逐步执行并汇总；所有阶段共用执行预算。</p>
             <textarea v-model="goal" required maxlength="2000" rows="5" :disabled="running" aria-label="任务目标" placeholder="例如：先计算128加256，再将结果乘以3，请使用工具并告诉我结果。"></textarea>
             <div class="react-examples"><button type="button" class="text-button" :disabled="running" @click="goal = '先计算128加256，再将结果乘以3，请使用工具并告诉我结果。'">多步计算</button><button type="button" class="text-button" :disabled="running" @click="goal = '查询上海和UTC的当前时间，说明时区差异。'">当前时间</button></div>
             <p class="tool-hint muted">Agent 会根据任务自动选择并调用可用工具，无需手动选择。</p>
@@ -52,18 +60,19 @@ onMounted(loadConfig);
         </section>
         <section v-if="running" class="card running-card" role="status"><span class="status-dot"></span>Agent 正在判断下一步并执行工具，完成后将展示完整过程。</section>
         <template v-if="result">
+          <section v-if="plan.length" class="card"><h2>执行计划</h2><ol class="plan-list"><li v-for="(item, index) in plan" :key="index">{{ item }} <span class="badge" :class="{ success: result.steps.some(step => step.type === 'STEP' && step.iteration === index + 1) }">{{ result.steps.some(step => step.type === 'STEP' && step.iteration === index + 1) ? '已完成' : '未完成' }}</span></li></ol></section>
           <section class="card"><h2>{{ labels[result.status] || result.status }}</h2><p v-if="result.stopReason" class="error">{{ result.stopReason }}</p><div v-if="result.answer" class="react-answer">{{ result.answer }}</div></section>
           <section class="card"><h2>执行过程</h2><p class="muted">展示工具动作和实际观察结果。</p>
             <div v-for="step in result.steps" :key="step.sequence" class="react-step">
-              <div class="react-step-title"><span :class="['badge', step.status === 'SUCCESS' ? 'success' : 'disabled']">{{ step.type === 'MODEL' ? '模型判断' : '工具执行' }}</span><strong>{{ step.toolName || step.summary }}</strong><small class="muted">第{{ step.iteration }}轮 · {{ step.durationMs }}ms</small></div>
+              <div class="react-step-title"><span :class="['badge', step.status === 'SUCCESS' ? 'success' : 'disabled']">{{ stepLabels[step.type] || step.type }}</span><strong>{{ step.toolName || step.summary }}</strong><small class="muted">{{ mode === 'REACT' ? '第' + step.iteration + '轮' : (step.type === 'FINAL' ? '汇总阶段' : (step.iteration ? '步骤' + step.iteration : '规划阶段')) }} · {{ step.durationMs }}ms</small></div>
               <pre v-if="step.arguments">{{ JSON.stringify(step.arguments, null, 2) }}</pre>
               <div v-if="step.observation" class="react-observation" :class="{ 'tool-error': step.status === 'ERROR' }">{{ step.observation }}</div>
             </div>
           </section>
         </template>
       </section>
-      <aside class="card react-details"><h2>执行设置</h2><dl><dt>执行策略</dt><dd>ReAct</dd><dt>当前模型</dt><dd>{{ config.modelName || '未配置' }}</dd><dt>最多模型调用</dt><dd>{{ config.maxIterations }} 次</dd><dt>最多工具调用</dt><dd>{{ config.maxToolCalls }} 次</dd><dt>执行时限</dt><dd>{{ config.taskTimeoutSeconds }} 秒</dd></dl>
-        <template v-if="result"><hr><h2>本次执行</h2><dl><dt>状态</dt><dd>{{ labels[result.status] }}</dd><dt>模型调用</dt><dd>{{ result.modelCalls }} 次</dd><dt>工具调用</dt><dd>{{ result.toolCalls }} 次</dd><dt>总耗时</dt><dd>{{ result.durationMs }}ms</dd></dl><p class="hint">执行编号：{{ result.runId }}</p></template>
+      <aside class="card react-details"><h2>执行设置</h2><dl><dt>执行策略</dt><dd>{{ modeLabel }}</dd><dt>当前模型</dt><dd>{{ config.modelName || '未配置' }}</dd><dt>最多模型调用</dt><dd>{{ config.maxIterations }} 次</dd><dt>最多工具调用</dt><dd>{{ config.maxToolCalls }} 次</dd><dt>执行时限</dt><dd>{{ config.taskTimeoutSeconds }} 秒</dd></dl>
+        <template v-if="result"><hr><h2>本次执行</h2><dl><dt>状态</dt><dd>{{ labels[result.status] }}</dd><dt>模型调用</dt><dd>{{ result.modelCalls }} 次</dd><dt>工具调用</dt><dd>{{ result.toolCalls }} 次</dd><dt>总耗时</dt><dd>{{ result.durationMs }}ms</dd><dt>输入 Token</dt><dd>{{ tokenCount(result.tokenUsage?.inputTokens) }}</dd><dt>输出 Token</dt><dd>{{ tokenCount(result.tokenUsage?.outputTokens) }}</dd><dt>总 Token</dt><dd>{{ tokenCount(result.tokenUsage?.totalTokens) }}</dd></dl><p class="hint" data-testid="token-usage-status">{{ !result.modelCalls ? '未调用模型' : !result.tokenUsage?.reportedModelCalls ? '模型服务未返回 Token 用量' : result.tokenUsage.complete ? 'Token 用量统计完整' : 'Token 用量为部分统计，可能低于实际消耗' }}<template v-if="result.modelCalls && result.tokenUsage?.reportedModelCalls"> · 已报告 {{ result.tokenUsage.reportedModelCalls }}/{{ result.modelCalls }} 次调用</template></p><p class="hint">执行编号：{{ result.runId }}</p></template>
       </aside>
     </div>
   </template>
@@ -71,6 +80,10 @@ onMounted(loadConfig);
 </template>
 
 <style scoped>
+.mode-selector { display: flex; flex-direction: row; gap: 16px; align-items: center; margin-top: 20px; }
+.mode-selector select { padding: 8px; border: 1px solid #dce2ed; border-radius: 8px; font: inherit; max-width: 100%; }
+.plan-list { padding-left: 22px; line-height: 2; overflow-wrap: anywhere; }
+.plan-list .badge { margin-left: 8px; }
 .react-grid { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 24px; align-items: start; }
 .react-main { display: grid; gap: 22px; min-width: 0; }
 textarea { width: 100%; padding: 14px; font: inherit; color: #19253d; border: 1px solid #dce2ed; border-radius: 8px; resize: vertical; line-height: 1.7; margin-top: 14px; }
