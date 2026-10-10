@@ -22,7 +22,6 @@ import dev.langchain4j.model.output.FinishReason;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -49,6 +48,11 @@ public class ReactServiceImpl implements ReactService {
     private final ReactProperties properties;
     private final AiModelProperties modelProperties;
 
+    /**
+     * 汇总模型可用状态、模型名称、执行预算和工具描述，不暴露认证配置。
+     *
+     * @return 模型、工具与执行预算配置
+     */
     @Override
     public ReactConfigVO configuration() {
         return new ReactConfigVO(modelGateway.isConfigured(), modelProperties.getModelName(),
@@ -56,13 +60,15 @@ public class ReactServiceImpl implements ReactService {
                 properties.getTaskTimeout().toSeconds(), toolRegistry.descriptions());
     }
 
+    /**
+     * 建立单次任务上下文，循环请求模型并执行注册工具，反馈观察结果；达到预算、超时或失败时停止。
+     *
+     * @param userId 目标用户 ID；当前用户接口从认证上下文获取
+     * @param request 已通过接口参数校验的请求数据
+     * @return 任务执行结果及轨迹
+     */
     @Override
     public ReactRunVO execute(Long userId, ReactRunDTO request) {
-        List<String> allowedTools = request.allowedTools() == null ? toolRegistry.names() : request.allowedTools();
-        if (allowedTools.isEmpty() || new HashSet<>(allowedTools).size() != allowedTools.size()
-                || !toolRegistry.names().containsAll(allowedTools)) {
-            throw new BusinessException(HttpStatus.BAD_REQUEST, "INVALID_TOOLS", "工具列表包含重复或未支持的工具");
-        }
         if (!modelGateway.isConfigured()) {
             throw new BusinessException(HttpStatus.SERVICE_UNAVAILABLE, "MODEL_NOT_CONFIGURED",
                     "请先在 application-local.yml 中启用并配置支持工具调用的模型");
@@ -86,7 +92,7 @@ public class ReactServiceImpl implements ReactService {
             ChatResponse response;
             try {
                 response = modelGateway.chat(ChatRequest.builder().messages(List.copyOf(messages))
-                        .toolSpecifications(toolRegistry.specifications(allowedTools))
+                        .toolSpecifications(toolRegistry.specifications())
                         .maxOutputTokens(MAX_OUTPUT_TOKENS).build(), remaining);
             } catch (RuntimeException exception) {
                 state.steps.add(new ReactStepVO(state.steps.size() + 1, iteration, "MODEL", "ERROR",
@@ -130,7 +136,7 @@ public class ReactServiceImpl implements ReactService {
                 }
                 long toolStarted = System.nanoTime();
                 state.toolCalls++;
-                ReactToolRegistry.ToolObservation observation = toolRegistry.execute(call, allowedTools);
+                ReactToolRegistry.ToolObservation observation = toolRegistry.execute(call);
                 state.steps.add(new ReactStepVO(state.steps.size() + 1, iteration, "TOOL",
                         observation.success() ? "SUCCESS" : "ERROR",
                         observation.success() ? "工具执行完成" : "工具调用失败",
@@ -142,6 +148,16 @@ public class ReactServiceImpl implements ReactService {
         return finish(userId, state, "LIMIT_REACHED", null, "达到模型迭代次数上限");
     }
 
+    /**
+     * 记录执行统计日志并生成结果快照，包含停止原因、耗时和执行步骤。
+     *
+     * @param userId 目标用户 ID；当前用户接口从认证上下文获取
+     * @param state 本次任务的累计执行状态
+     * @param status 任务结束状态
+     * @param answer 最终回答，失败或提前停止时可为 null
+     * @param reason 停止原因，成功时可为 null
+     * @return 任务执行结果及轨迹
+     */
     private ReactRunVO finish(Long userId, RunState state, String status, String answer, String reason) {
         log.info("ReAct completed, userId={}, runId={}, status={}, modelCalls={}, toolCalls={}",
                 userId, state.runId, status, state.modelCalls, state.toolCalls);
@@ -149,6 +165,12 @@ public class ReactServiceImpl implements ReactService {
                 state.toolCalls, elapsed(state.started), List.copyOf(state.steps));
     }
 
+    /**
+     * 将单调时钟起点与当前时刻的差值转换为毫秒，避免系统时间调整影响计时。
+     *
+     * @param started System.nanoTime 获取的计时起点
+     * @return 已过去的毫秒数
+     */
     private static long elapsed(long started) {
         return Duration.ofNanos(System.nanoTime() - started).toMillis();
     }

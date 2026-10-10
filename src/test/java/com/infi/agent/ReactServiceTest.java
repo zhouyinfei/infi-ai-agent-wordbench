@@ -55,6 +55,8 @@ class ReactServiceTest {
         assertThat(result.modelCalls()).isEqualTo(3);
         assertThat(result.toolCalls()).isEqualTo(2);
         assertThat(result.answer()).contains("1152");
+        assertThat(gateway.requests.get(0).toolSpecifications()).extracting(specification -> specification.name())
+                .containsExactlyInAnyOrder("calculator", "current_time");
         assertThat(result.steps()).hasSize(5);
         assertThat(gateway.requests.get(1).messages()).anySatisfy(message -> {
             assertThat(message).isInstanceOf(ToolExecutionResultMessage.class);
@@ -92,15 +94,15 @@ class ReactServiceTest {
 
     @Test
     void unauthorizedToolIsNotExecuted() {
-        gateway.enqueue(tool("one", "current_time", "{}"));
+        gateway.enqueue(tool("one", "shell", "{}"));
         gateway.enqueue(AiMessage.from("没有时间工具权限。"));
-        var result = service.execute(1L, new ReactRunDTO("查询时间", List.of("calculator")));
+        var result = service.execute(1L, new ReactRunDTO("查询时间"));
         assertThat(result.steps()).anySatisfy(step -> {
             assertThat(step.status()).isEqualTo("ERROR");
             assertThat(step.observation()).contains("白名单");
         });
         assertThat(gateway.requests.get(0).toolSpecifications()).extracting(specification -> specification.name())
-                .containsExactly("calculator");
+                .containsExactlyInAnyOrder("calculator", "current_time");
     }
 
     @Test
@@ -125,7 +127,7 @@ class ReactServiceTest {
     @Test
     void iterationLimitStopsExecution() {
         properties.setMaxIterations(1);
-        gateway.enqueue(tool("one", "current_time", "{}"));
+        gateway.enqueue(tool("one", "shell", "{}"));
         var result = service.execute(1L, goal());
         assertThat(result.status()).isEqualTo("LIMIT_REACHED");
         assertThat(result.stopReason()).contains("迭代");
@@ -161,14 +163,11 @@ class ReactServiceTest {
     }
 
     @Test
-    void missingConfigurationAndInvalidWhitelistAreRejected() {
+    void missingConfigurationIsRejected() {
         gateway.configured = false;
         assertThatThrownBy(() -> service.execute(1L, goal()))
                 .isInstanceOfSatisfying(BusinessException.class, error ->
                         assertThat(error.getCode()).isEqualTo("MODEL_NOT_CONFIGURED"));
-        assertThatThrownBy(() -> service.execute(1L, new ReactRunDTO("目标", List.of("shell"))))
-                .isInstanceOfSatisfying(BusinessException.class, error ->
-                        assertThat(error.getCode()).isEqualTo("INVALID_TOOLS"));
     }
 
     @Test
@@ -184,10 +183,10 @@ class ReactServiceTest {
     void builtInToolsRejectInvalidDataAndReturnDeterministicTime() throws Exception {
         ObjectMapper mapper = new ObjectMapper();
         var observation = registry.execute(ToolExecutionRequest.builder().id("one").name("current_time")
-                .arguments("{}").build(), registry.names());
+                .arguments("{}").build());
         assertThat(observation.result()).isEqualTo("2026-10-10T10:00:00+08:00[Asia/Shanghai]");
         assertThat(registry.execute(ToolExecutionRequest.builder().id("two").name("current_time")
-                .arguments("{\"timezone\":\"not-a-zone\"}").build(), registry.names()).success()).isFalse();
+                .arguments("{\"timezone\":\"not-a-zone\"}").build()).success()).isFalse();
         CalculatorTool calculator = new CalculatorTool();
         assertThat(calculator.execute(mapper.readTree("{\"left\":0.1,\"operator\":\"ADD\",\"right\":0.2}")))
                 .isEqualTo("0.3");
@@ -203,15 +202,15 @@ class ReactServiceTest {
     void precisionAndTrailingJsonAreValidatedAtToolBoundary() {
         var precise = registry.execute(ToolExecutionRequest.builder().id("precise").name("calculator")
                 .arguments("{\"left\":0.123456789012345678901,\"operator\":\"ADD\",\"right\":0.000000000000000000001}")
-                .build(), registry.names());
+                .build());
         assertThat(precise.result()).isEqualTo("0.123456789012345678902");
         var trailing = registry.execute(ToolExecutionRequest.builder().id("trailing").name("current_time")
-                .arguments("{} {}").build(), registry.names());
+                .arguments("{} {}").build());
         assertThat(trailing.success()).isFalse();
     }
 
     private ReactRunDTO goal() {
-        return new ReactRunDTO("完成测试任务", null);
+        return new ReactRunDTO("完成测试任务");
     }
 
     private AiMessage tool(String id, String name, String arguments) {

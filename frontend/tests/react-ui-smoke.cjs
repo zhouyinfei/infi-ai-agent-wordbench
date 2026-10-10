@@ -32,7 +32,7 @@ const server = http.createServer((req, res) => {
       else if (endpoint === '/api/react/config') data = configuration();
       else if (endpoint === '/api/react/runs') {
         runCount++;
-        assert.ok(request.postDataJSON().allowedTools.includes('calculator'));
+        assert.deepEqual(Object.keys(request.postDataJSON()), ['goal']);
         assert.equal(request.headers().authorization, 'Bearer test-token');
         data = { runId: 'react-ui-self-test', status: success ? 'SUCCEEDED' : 'LIMIT_REACHED',
           answer: success ? '128加256得到384，再乘以3，最终结果为1152。' : null,
@@ -53,6 +53,8 @@ const server = http.createServer((req, res) => {
     await page.getByLabel('密码', { exact: true }).fill('Password123!');
     await page.getByRole('button', { name: '登录', exact: true }).click();
     await page.getByRole('heading', { name: '会话工作台', exact: true }).waitFor();
+    assert.equal(await page.getByRole('checkbox').count(), 0);
+    await page.getByText('Agent 会根据任务自动选择并调用可用工具，无需手动选择。', { exact: true }).waitFor();
     await page.getByRole('button', { name: '多步计算' }).click();
     await page.getByRole('button', { name: '开始执行' }).click();
     await page.getByRole('heading', { name: '执行完成', exact: true }).waitFor();

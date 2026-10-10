@@ -58,10 +58,10 @@ class ReactControllerTest {
     }
 
     @Test
-    void invalidGoalAndEmptyToolListAreRejected() throws Exception {
+    void invalidGoalsAreRejected() throws Exception {
         when(sessionService.resolve("valid")).thenReturn(new UserPrincipal(7L, "alice", "USER"));
-        for (String input : List.of("{\"goal\":\" \"}", "{\"goal\":\"计算\",\"allowedTools\":[]}",
-                "{\"goal\":\"计算\",\"allowedTools\":[\"\"]}")) {
+        for (String input : List.of("{\"goal\":\" \"}", "{}", 
+                "{\"goal\":\"" + "a".repeat(2001) + "\"}")) {
             mvc.perform(post("/api/react/runs").header("Authorization", "Bearer valid")
                     .contentType("application/json").content(input)).andExpect(status().isBadRequest());
         }

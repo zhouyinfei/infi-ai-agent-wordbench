@@ -32,6 +32,12 @@ public class RedisSessionServiceImpl implements SessionService {
     private final UserMapper userMapper;
     private final AuthProperties properties;
 
+    /**
+     * 生成随机令牌，将令牌的 SHA-256 摘要映射到用户 ID 和凭证版本，并设置 Redis 有效期。
+     *
+     * @param user 已查询或创建的用户及其凭证版本
+     * @return 返回客户端的原始登录令牌
+     */
     @Override
     public String create(UserDO user) {
         byte[] bytes = new byte[32];
@@ -42,6 +48,12 @@ public class RedisSessionServiceImpl implements SessionService {
         return token;
     }
 
+    /**
+     * 检查令牌格式并读取 Redis 会话，再核对数据库用户状态及凭证版本；无效时返回 null。
+     *
+     * @param token 客户端登录令牌
+     * @return 有效用户身份；凭证无效时为 null
+     */
     @Override
     public UserPrincipal resolve(String token) {
         if (token == null || !token.matches("[A-Za-z0-9_-]{43}")) {
@@ -60,17 +72,33 @@ public class RedisSessionServiceImpl implements SessionService {
         return new UserPrincipal(user.getId(), user.getUsername(), user.getRole());
     }
 
+    /**
+     * 删除令牌摘要对应的 Redis 会话，立即撤销该登录凭证。
+     *
+     * @param token 客户端登录令牌
+     */
     @Override
     public void revoke(String token) {
         redisTemplate.delete(SESSION_PREFIX + digest(token));
     }
 
+    /**
+     * 分别检查用户名和来源地址对应的 Redis 登录限流桶。
+     *
+     * @param username 用户名
+     * @param remoteAddress 登录请求的来源地址
+     */
     @Override
     public void checkLoginLimit(String username, String remoteAddress) {
         checkBucket("agent:login:user:" + digest(username));
         checkBucket("agent:login:ip:" + digest(remoteAddress));
     }
 
+    /**
+     * 通过 Lua 原子递增登录次数并在首次访问时设置窗口有效期，超限时拒绝登录。
+     *
+     * @param key Redis 登录限流桶键
+     */
     private void checkBucket(String key) {
         Long attempts = redisTemplate.execute(RATE_SCRIPT, List.of(key),
                 String.valueOf(properties.getLoginWindow().toMillis()));
@@ -79,6 +107,12 @@ public class RedisSessionServiceImpl implements SessionService {
         }
     }
 
+    /**
+     * 使用 UTF-8 编码计算 SHA-256 十六进制摘要，用于 Redis 会话及限流键。
+     *
+     * @param value 待计算摘要的字符串
+     * @return SHA-256 十六进制摘要
+     */
     private static String digest(String value) {
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")

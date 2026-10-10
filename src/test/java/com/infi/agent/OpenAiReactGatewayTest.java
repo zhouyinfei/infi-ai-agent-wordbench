@@ -74,7 +74,7 @@ class OpenAiReactGatewayTest {
             exchange.close();
         });
         server.start();
-        var result = service.execute(1L, new ReactRunDTO("先加再乘", List.of("calculator")));
+        var result = service.execute(1L, new ReactRunDTO("先加再乘"));
         assertThat(result.status()).isEqualTo("SUCCEEDED");
         assertThat(result.answer()).contains("1152");
         assertThat(requests).hasSize(3);
@@ -103,7 +103,7 @@ class OpenAiReactGatewayTest {
             exchange.close();
         });
         server.start();
-        var result = service.execute(1L, new ReactRunDTO("计算1加2", List.of("calculator")));
+        var result = service.execute(1L, new ReactRunDTO("计算1加2"));
         assertThat(result.status()).isEqualTo("FAILED");
         assertThat(result.stopReason()).doesNotContain("private-provider-detail");
         assertThat(count).hasValue(1);

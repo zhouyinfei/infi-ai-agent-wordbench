@@ -22,11 +22,23 @@ import org.springframework.web.bind.annotation.RestController;
 public class ReactController {
     private final ReactService reactService;
 
+    /**
+     * 返回模型是否配置、可用工具及 ReAct 执行限制，不包含模型密钥。
+     *
+     * @return 模型、工具与执行预算配置
+     */
     @GetMapping("/config")
     public ApiResponse<ReactConfigVO> configuration() {
         return ApiResponse.success(reactService.configuration());
     }
 
+    /**
+     * 以当前登录用户身份同步执行任务，返回最终结果及模型和工具调用轨迹。
+     *
+     * @param principal 认证上下文中的当前登录用户
+     * @param request 已通过接口参数校验的请求数据
+     * @return 任务执行结果及轨迹
+     */
     @PostMapping("/runs")
     public ApiResponse<ReactRunVO> run(@AuthenticationPrincipal UserPrincipal principal,
                                      @Valid @RequestBody ReactRunDTO request) {

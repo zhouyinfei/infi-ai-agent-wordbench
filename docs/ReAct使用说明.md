@@ -43,7 +43,7 @@ application.yml 保留同结构占位备份。不通过接口返回密钥或连�
 - 相同工具与相同参数字符串最多执行2次，后续停止循环。
 - 任务总时限90秒，每次模型请求最多30秒且不超过剩余时限。
 - 每次模型输出上限1024 Token；模型请求自动重试关闭。
-- 工具只能来自当前任务白名单，参数必须通过服务端校验，计算器不执行脚本或字符串表达式。
+- 工具只能来自服务端注册白名单，参数必须通过服务端校验，计算器不执行脚本或字符串表达式。
 - 计算器操作数绝对值不超过1E20，数字长度及小数尺度受限；除法使用 DECIMAL128 精度。
 
 反向代理请求超时应大于任务时限，避免浏览器提前收到代理超时。本阶段同步请求没有持久化、任务恢复或取消接口。
@@ -60,12 +60,11 @@ application.yml 保留同结构占位备份。不通过接口返回密钥或连�
 
 ```json
 {
-  "goal": "先计算128加256，再将结果乘以3，请使用工具并告诉我结果。",
-  "allowedTools": ["calculator", "current_time"]
+  "goal": "先计算128加256，再将结果乘以3，请使用工具并告诉我结果。"
 }
 ```
 
-goal 必填，最多2000字。allowedTools 可省略（默认全部内置工具），显式指定时须包含1至2个不重复的支持工具；空列表、未知工具或重复工具被拒绝。模型提议的未授权工具不会执行，只会得到错误观察。
+请求仅包含 goal，必填且最多2000字。服务端向模型提供全部已注册工具；模型提议的未注册工具不会执行，只会得到错误观察。
 
 执行响应采用统一 ApiResponse 包装，data 包含 runId、status、answer、stopReason、modelCalls、toolCalls、durationMs、steps。
 
@@ -120,6 +119,11 @@ controller/ReactController → service/ReactService → service/impl/ReactServic
 
 ### @Tool 工具注册
 
-计算器和时间工具使用 LangChain4j 的 `@Tool`、`@P` 注解定义名称、描述和参数，`ToolSpecifications` 从注解生成发送给模型的工具协议。`ReactToolRegistry` 继续处理本次授权白名单和严格 JSON 校验，通过工具的 JSON 适配入口调用注解方法，以保留 BigDecimal 精度、参数边界和中文错误反馈。模型创建方式与手动 ReAct 循环保持一致；工具协议随每次 ChatRequest 传入模型。
+计算器和时间工具使用 LangChain4j 的 `@Tool`、`@P` 注解定义名称、描述和参数，`ToolSpecifications` 从注解生成发送给模型的工具协议。`ReactToolRegistry` 继续处理服务端注册白名单和严格 JSON 校验，通过工具的 JSON 适配入口调用注解方法，以保留 BigDecimal 精度、参数边界和中文错误反馈。模型创建方式与手动 ReAct 循环保持一致；工具协议随每次 ChatRequest 传入模型。
 
 新增工具时，实现 ReactTool 并交由 Spring 管理，声明一个公开的 @Tool 方法，在 execute(JsonNode) 中校验参数并调用该方法。当前没有启用 AiServices 自动执行循环。
+
+
+### 自动选择工具
+
+工作台只提交任务目标，不再提供工具勾选。后端默认将全部已注册的内置工具描述提供给模型，LLM 根据目标决定是否调用、调用哪个工具以及参数；服务端继续校验工具名称、参数并执行预算限制。请求 DTO 仅保留 goal，工具范围由后端注册表统一管理。

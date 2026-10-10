@@ -39,15 +39,15 @@ test('wrong login password does not trigger global expiry event', async () => {
   assert.deepEqual(events, []);
 });
 
-test('ReAct submits goal and tool authorization with bearer token', async () => {
+test('ReAct submits only goal with bearer token for automatic tool selection', async () => {
   saveToken('react-token');
   globalThis.fetch = async (url, options) => {
     assert.equal(url, '/api/react/runs');
     assert.equal(options.headers.Authorization, 'Bearer react-token');
-    assert.deepEqual(JSON.parse(options.body), { goal: '计算', allowedTools: ['calculator'] });
+    assert.deepEqual(JSON.parse(options.body), { goal: '计算' });
     return { ok: true, json: async () => ({ data: { status: 'SUCCEEDED', answer: '42' } }) };
   };
-  assert.equal((await reactApi.run({ goal: '计算', allowedTools: ['calculator'] })).answer, '42');
+  assert.equal((await reactApi.run({ goal: '计算' })).answer, '42');
 });
 
 test('missing model is a service error and does not erase login', async () => {
