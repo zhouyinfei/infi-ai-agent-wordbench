@@ -2,6 +2,12 @@
 
 前后端分离的 AI Agent 平台，当前已实现用户系统与 ReAct 同步执行闭环。
 
+## 界面设计预览
+
+下图展示项目的目标界面设计，部分功能将在后续阶段实现。
+
+![Agent 工作台界面设计](docs/images/agent-workspace-preview.png)
+
 ## 环境
 
 - JDK 17、Maven 3.6.3+
