@@ -43,6 +43,12 @@ app:
     # 隐私配置备份占位，实际密钥填入 application-local.yml 或环境变量。
     api-key: ${AI_API_KEY:}
     request-timeout: 30s
+  multi-agent:
+    max-iterations: 12
+    max-tool-calls: 10
+    max-repeated-calls: 2
+    max-tasks: 4
+    task-timeout: 90s
   react:
     max-iterations: 6
     max-tool-calls: 10

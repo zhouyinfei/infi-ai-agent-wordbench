@@ -57,3 +57,9 @@ export const reactApi = {
 export const planExecuteApi = {
   run: (data) => request('/plan-execute/runs', { method: 'POST', body: JSON.stringify(data) }),
 };
+
+
+export const multiAgentApi = {
+  configuration: () => request('/multi-agent/config'),
+  run: (data) => request('/multi-agent/runs', { method: 'POST', body: JSON.stringify(data) }),
+};

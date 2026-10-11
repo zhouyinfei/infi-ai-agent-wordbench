@@ -21,6 +21,7 @@ const server = http.createServer((req, res) => {
     let configured = true;
     let success = true;
     let usageMode = 'complete';
+    let multiReviewApproved = true;
     const configuration = () => ({
       configured, modelName: 'self-test-model', maxIterations: 6, maxToolCalls: 10, taskTimeoutSeconds: 90,
       tools: [{ name: 'calculator', description: '计算器' }, { name: 'current_time', description: '当前时间' }],
@@ -30,8 +31,8 @@ const server = http.createServer((req, res) => {
       const endpoint = new URL(request.url()).pathname;
       let data;
       if (endpoint === '/api/auth/login') data = { token: 'test-token', user: { id: 7, username: 'alice', nickname: '研究员', role: 'USER', status: 1 } };
-      else if (endpoint === '/api/react/config') data = configuration();
-      else if (endpoint === '/api/react/runs' || endpoint === '/api/plan-execute/runs') {
+      else if (endpoint === '/api/react/config' || endpoint === '/api/multi-agent/config') data = { ...configuration(), maxIterations: endpoint === '/api/multi-agent/config' ? 12 : 6 };
+      else if (endpoint === '/api/react/runs' || endpoint === '/api/plan-execute/runs' || endpoint === '/api/multi-agent/runs') {
         runCount++;
         assert.deepEqual(Object.keys(request.postDataJSON()), ['goal']);
         assert.equal(request.headers().authorization, 'Bearer test-token');
@@ -46,13 +47,27 @@ const server = http.createServer((req, res) => {
             { sequence: 5, iteration: 3, type: 'MODEL', status: 'SUCCESS', summary: '模型给出最终回答', durationMs: 150 },
           ],
         };
-        if (endpoint === '/api/plan-execute/runs') {
+        if (endpoint === '/api/plan-execute/runs' || endpoint === '/api/multi-agent/runs') {
           data.modelCalls = 6;
           data.steps = [
             { sequence: 1, iteration: 0, type: 'PLAN', status: 'SUCCESS', summary: '执行计划', arguments: ['计算128加256', '把结果乘以3'], durationMs: 0 },
             { sequence: 2, iteration: 1, type: 'STEP', status: 'SUCCESS', summary: '第一步完成', observation: '384', durationMs: 1 },
             { sequence: 3, iteration: 2, type: 'STEP', status: 'SUCCESS', summary: '第二步完成', observation: '1152', durationMs: 1 },
             { sequence: 4, iteration: 3, type: 'FINAL', status: 'SUCCESS', summary: '模型返回阶段结果', durationMs: 100 },
+          ];
+        }
+        if (endpoint === '/api/multi-agent/runs') {
+          data.modelCalls = 7;
+          if (!multiReviewApproved) {
+            data.status = 'FAILED';
+            data.answer = null;
+            data.stopReason = '审校未通过：结果缺少证据';
+          }
+          data.steps = [
+            { sequence: 1, iteration: 0, type: 'COORDINATE', status: 'SUCCESS', summary: '协作分工', agentName: '协调 Agent', arguments: [{ agent: 'CALCULATOR', goal: '计算结果' }, { agent: 'ANALYST', goal: '分析结果' }], durationMs: 0 },
+            { sequence: 2, iteration: 1, type: 'AGENT', status: 'SUCCESS', summary: '计算完成', agentName: '计算 Agent', observation: '1152', durationMs: 1 },
+            { sequence: 3, iteration: 2, type: 'AGENT', status: 'SUCCESS', summary: '分析完成', agentName: '分析 Agent', observation: '1152', durationMs: 1 },
+            { sequence: 4, iteration: 3, type: 'REVIEW', status: multiReviewApproved ? 'SUCCESS' : 'ERROR', summary: multiReviewApproved ? '审校通过' : '审校未通过', agentName: '审校 Agent', observation: '证据一致', durationMs: 1 },
           ];
         }
         data.tokenUsage = usageMode === 'none' ? null : {
@@ -103,6 +118,23 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.getByText('总 Token', { exact: true }).locator('xpath=following-sibling::dd[1]').textContent(), '未提供');
     await page.setViewportSize({ width: 390, height: 844 });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+    usageMode = 'complete';
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.getByRole('combobox').selectOption('MULTI_AGENT');
+    await page.getByRole('button', { name: '开始执行' }).click();
+    await page.getByRole('heading', { name: '协作分工', exact: true }).waitFor();
+    assert.equal(await page.locator('.collaboration-list li').count(), 2);
+    assert.equal(await page.locator('.agent-role').count(), 4);
+    await page.getByText('审校通过', { exact: true }).waitFor();
+    assert.equal(await page.getByText('总 Token', { exact: true }).locator('xpath=following-sibling::dd[1]').textContent(), '105');
+    await page.screenshot({ path: 'docs/images/multi-agent-workbench-v1.png', fullPage: true });
+    multiReviewApproved = false;
+    await page.getByRole('button', { name: '开始执行' }).click();
+    await page.getByRole('heading', { name: '执行失败', exact: true }).waitFor();
+    await page.getByText('审校未通过：结果缺少证据', { exact: true }).waitFor();
+    assert.equal(await page.locator('.collaboration-list .success').count(), 2);
+    await page.setViewportSize({ width: 390, height: 844 });
+    assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
     configured = false;
     await page.getByRole('button', { name: '个人中心' }).click();
     await page.getByRole('button', { name: '会话工作台' }).click();
@@ -111,7 +143,7 @@ const server = http.createServer((req, res) => {
     await page.setViewportSize({ width: 390, height: 844 });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
     assert.deepEqual(errors, []);
-    console.log('Agent browser smoke passed: ReAct/Plan-and-Execute, token totals, complete/partial/missing usage, budget stop, unconfigured model, mobile layout. API responses simulated.');
+    console.log('Agent browser smoke passed: ReAct/Plan-and-Execute/Multi-Agent, role handoffs, review rejection, token totals, complete/partial/missing usage, budget stop, unconfigured model, mobile layout. API responses simulated.');
   } finally {
     await browser.close();
     await new Promise(resolve => server.close(resolve));

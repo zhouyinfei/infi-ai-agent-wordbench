@@ -1,0 +1,49 @@
+package com.infi.agent.multi;
+
+import java.util.List;
+
+/** 固定协作角色，模型只选择角色，不能自行扩展权限或创建递归子 Agent。 */
+public enum AgentRole {
+    COORDINATOR("协调 Agent", "只负责分配任务。", List.of()),
+    CALCULATOR("计算 Agent", "负责精确计算，必须基于计算器的实际结果回答。", List.of("calculator")),
+    TIME("时间 Agent", "负责查询当前时间和时区，只使用当前时间工具。", List.of("current_time")),
+    ANALYST("分析 Agent", "只分析原始资料和其他Agent提供的结果，不调用工具，不编造外部事实。", List.of()),
+    REVIEWER("审校 Agent", "独立核对各Agent结果和实际工具证据，不调用工具。", List.of());
+
+    private final String displayName;
+    private final String description;
+    private final List<String> tools;
+
+    /**
+     * 定义角色的系统职责及服务端工具权限。
+     *
+     * @param displayName 工作台展示名称
+     * @param description 系统角色职责
+     * @param tools 不可修改的工具名称列表
+     */
+    AgentRole(String displayName, String description, List<String> tools) {
+        this.displayName = displayName;
+        this.description = description;
+        this.tools = List.copyOf(tools);
+    }
+
+    /** @return 当前角色的公开名称 */
+    public String displayName() {
+        return displayName;
+    }
+
+    /** @return 由服务端定义的角色职责 */
+    public String description() {
+        return description;
+    }
+
+    /** @return 当前角色允许使用的工具，不由用户或模型修改 */
+    public List<String> tools() {
+        return tools;
+    }
+
+    /** @return 是否允许被协调者分配专业子任务 */
+    public boolean isWorker() {
+        return this == CALCULATOR || this == TIME || this == ANALYST;
+    }
+}

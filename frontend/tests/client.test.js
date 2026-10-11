@@ -1,6 +1,6 @@
 import { beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { request, saveToken, getToken, planExecuteApi, reactApi } from '../src/api/client.js';
+import { request, saveToken, getToken, multiAgentApi, planExecuteApi, reactApi } from '../src/api/client.js';
 
 const memory = new Map();
 let events;
@@ -68,4 +68,20 @@ test('Plan-and-Execute submits only goal to its authenticated endpoint', async (
     return { ok: true, json: async () => ({ data: { status: 'SUCCEEDED', answer: '1152' } }) };
   };
   assert.equal((await planExecuteApi.run({ goal: '先加再乘' })).answer, '1152');
+});
+
+
+test('Multi-Agent uses its configuration and authenticated goal endpoint', async () => {
+  saveToken('multi-token');
+  globalThis.fetch = async (url, options) => {
+    assert.equal(options.headers.Authorization, 'Bearer multi-token');
+    if (url === '/api/multi-agent/config') {
+      return { ok: true, json: async () => ({ data: { maxIterations: 12 } }) };
+    }
+    assert.equal(url, '/api/multi-agent/runs');
+    assert.deepEqual(JSON.parse(options.body), { goal: '协作任务' });
+    return { ok: true, json: async () => ({ data: { status: 'SUCCEEDED', answer: '协作结果' } }) };
+  };
+  assert.equal((await multiAgentApi.configuration()).maxIterations, 12);
+  assert.equal((await multiAgentApi.run({ goal: '协作任务' })).answer, '协作结果');
 });

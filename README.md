@@ -1,6 +1,6 @@
 # Infi AI Agent
 
-前后端分离的 AI Agent 平台，当前已实现用户系统、ReAct 与 Plan-and-Execute 同步执行。
+前后端分离的 AI Agent 平台，当前已实现用户系统、ReAct、Plan-and-Execute 与同步 Multi-Agent 协作。
 
 ## 界面设计预览
 
@@ -63,3 +63,8 @@ application.yml 保存普通配置及隐私项的环境变量占位备份。appl
 
 
 执行结果中的“本次执行”会显示模型服务返回的累计输入、输出和总 Token 用量。两种模式均统计所有模型调用；未返回用量时显示“未提供”，部分统计会标明覆盖次数，不估算实际账单。Token 统计回归后，65 项后端测试、6 项前端测试、生产构建及浏览器检查均通过。
+
+
+## Multi-Agent 协作
+
+工作台新增 Multi-Agent 模式：协调 Agent 分工，计算、时间和分析 Agent 在独立上下文中顺序执行，审校 Agent 核对真实证据并汇总。角色工具权限由后端固定，整次协作共用预算及 Token 统计。详见 [Multi-Agent 使用说明](docs/Multi-Agent使用说明.md)。
