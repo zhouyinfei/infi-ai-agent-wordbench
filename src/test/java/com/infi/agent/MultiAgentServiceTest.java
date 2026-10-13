@@ -5,6 +5,8 @@ import com.infi.agent.common.BusinessException;
 import com.infi.agent.config.AiModelProperties;
 import com.infi.agent.config.MultiAgentProperties;
 import com.infi.agent.dto.MultiAgentRunDTO;
+import com.infi.agent.multi.AgentRegistry;
+import com.infi.agent.multi.DefaultAgentExecutor;
 import com.infi.agent.react.model.ReactModelGateway;
 import com.infi.agent.react.tool.CalculatorTool;
 import com.infi.agent.react.tool.CurrentTimeTool;
@@ -44,7 +46,7 @@ class MultiAgentServiceTest {
         ObjectMapper mapper = new ObjectMapper();
         var registry = new ReactToolRegistry(List.of(new CalculatorTool(), new CurrentTimeTool(
                 Clock.fixed(Instant.parse("2026-10-11T02:00:00Z"), ZoneOffset.UTC))), mapper);
-        service = new MultiAgentServiceImpl(gateway, registry, properties, mapper, new AiModelProperties());
+        service = new MultiAgentServiceImpl(gateway, registry, properties, new AgentRegistry(new DefaultAgentExecutor(gateway, registry, mapper), mapper), new AiModelProperties());
     }
 
     @Test

@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.infi.agent.config.AiModelProperties;
 import com.infi.agent.config.MultiAgentProperties;
 import com.infi.agent.dto.MultiAgentRunDTO;
+import com.infi.agent.multi.AgentRegistry;
+import com.infi.agent.multi.DefaultAgentExecutor;
 import com.infi.agent.react.model.OpenAiReactModelGateway;
 import com.infi.agent.react.tool.CalculatorTool;
 import com.infi.agent.react.tool.ReactToolRegistry;
@@ -57,8 +59,10 @@ class OpenAiMultiAgentGatewayTest {
             model.setModelName("local-test");
             model.setBaseUrl("http://127.0.0.1:" + server.getAddress().getPort() + "/v1");
             model.setRequestTimeout(Duration.ofSeconds(2));
-            var service = new MultiAgentServiceImpl(new OpenAiReactModelGateway(model),
-                    new ReactToolRegistry(List.of(new CalculatorTool()), mapper), new MultiAgentProperties(), mapper, model);
+            var gateway = new OpenAiReactModelGateway(model);
+            var tools = new ReactToolRegistry(List.of(new CalculatorTool()), mapper);
+            var agents = new AgentRegistry(new DefaultAgentExecutor(gateway, tools, mapper), mapper);
+            var service = new MultiAgentServiceImpl(gateway, tools, new MultiAgentProperties(), agents, model);
             var result = service.execute(7L, new MultiAgentRunDTO("计算1加2"));
             assertThat(result.status()).isEqualTo("SUCCEEDED");
             assertThat(result.modelCalls()).isEqualTo(4);

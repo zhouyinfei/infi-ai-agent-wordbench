@@ -71,3 +71,51 @@ ReAct 与 Plan-and-Execute 继续使用原来的 app.react 配置。
 
 
 本阶段验证结果：94 项后端测试、7 项前端接口测试、生产构建及桌面/移动端浏览器检查全部通过。后端包含真实 LangChain4j 客户端对本地 HTTP 模型替身的协作协议验证；浏览器接口为模拟数据，未调用真实外部模型。
+
+## 独立 Agent 架构（2026-10-12）
+
+当前采用统一接口和独立角色实例：
+
+```java
+public interface Agent {
+    AgentRole role();
+    AgentResult execute(AgentTask task, AgentExecutionContext context);
+}
+```
+
+第二个参数只提供整次协作的共享预算、截止时间、Token统计和公开轨迹，不包含任何角色的模型消息。
+
+| 组件 | 职责 |
+| --- | --- |
+| MultiAgentServiceImpl | 委派协调、专业、审校任务；校验交付身份并决定是否继续 |
+| AgentRegistry | 保存各角色独立实例，支持替换为专业 Agent 实现 |
+| ConfiguredAgent | 通用配置型 Agent，组合固定职责、执行器和专业交付规则 |
+| DefaultAgentExecutor | 无状态执行器，每次调用创建独立消息与证据，管理本 Agent 工具循环 |
+| AgentTask / AgentResult | 目标、角色、任务编号、完成状态、结果和证据的交接协议 |
+| CoordinatorOutputHandler | 协调 Agent 专业规则：严格解析并校验角色分工 |
+| ReviewerOutputHandler | 审校 Agent 专业规则：校验通过或拒绝，输出结构化审校结论 |
+| AgentExecutionContext | 整次执行的预算和统计，不保存当前角色或共享消息列表 |
+
+```mermaid
+flowchart TD
+    S[协调服务] --> C[协调 Agent 实例]
+    C --> A[结构化角色委派]
+    A --> W[专业 Agent 实例]
+    W --> E[无状态通用执行器]
+    E --> M[模型与角色授权工具]
+    W --> R[结构化结果与实际证据]
+    R --> V[审校 Agent 实例]
+    V --> S
+```
+
+协调服务不再构建专业提示词、不直接调用 chat、不执行工具循环，也没有可变的 currentAgent 字段。
+共享同一个模型或执行器并不代表共享上下文：消息和证据列表是每次 Agent 调用的局部数据。
+角色实例本身也不保存会话。AgentTask 与 AgentResult 使用不可变列表快照，工具参数节点在证据交付时复制。
+
+专业执行可以继续复用 ConfiguredAgent；需要不同处理流程时，实现 Agent 并在 AgentRegistry 中替换对应角色。
+注册表要求团队角色完整且不重复。协调服务校验交付角色、任务编号和目标，拒绝冒用其他任务结果。
+审校必须提供显式的通过结论；原有角色权限、全局预算、Token统计和前端展示保持兼容。
+
+架构重构验证：103 项后端测试全部通过，包含9项直接执行、实例隔离、专业实现替换、结构化交接和失败中止测试；
+原有协作流程、HTTP模型协议、角色权限、用户系统、ReAct、Plan-and-Execute及Token回归均通过。
+本轮只调整后端架构和说明，前端调用协议保持一致。测试没有调用真实外部模型。

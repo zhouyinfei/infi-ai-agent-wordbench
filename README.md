@@ -68,3 +68,6 @@ application.yml 保存普通配置及隐私项的环境变量占位备份。appl
 ## Multi-Agent 协作
 
 工作台新增 Multi-Agent 模式：协调 Agent 分工，计算、时间和分析 Agent 在独立上下文中顺序执行，审校 Agent 核对真实证据并汇总。角色工具权限由后端固定，整次协作共用预算及 Token 统计。详见 [Multi-Agent 使用说明](docs/Multi-Agent使用说明.md)。
+
+
+Multi-Agent 已重构为统一 Agent 接口、独立角色实例与无状态通用执行器。协调服务只委派任务和消费结构化交付，专业 Agent 自己管理执行上下文与工具循环，支持按需替换专业实现。架构重构后103项后端测试通过，详见协作使用说明中的架构章节。
