@@ -16,7 +16,7 @@
 
 ## 初始化与启动
 
-1. 执行 `sql/001_user.sql` 创建数据库和用户表。
+1. 执行 `sql/001_user.sql` 创建数据库和用户表，再在同一数据库执行 `sql/002_conversation.sql` 创建会话表。本机本次联调已完成会话表初始化。
 2. 编辑 `src/main/resources/application-local.yml`，填写 MySQL、Redis 配置及首次管理员账号密码。该文件被 Git 忽略。
 3. 首次在空用户表上启动前设置 `BOOTSTRAP_ADMIN_USERNAME`、`BOOTSTRAP_ADMIN_PASSWORD`，或填写 local 文件对应字段。密码遵循8–64位可见 ASCII 规则。管理员创建后清空初始化密码配置；不提供默认管理员或默认密码。
 4. 后端：在项目根目录执行 `mvn spring-boot:run`，当前配置端口8126。
@@ -71,3 +71,8 @@ application.yml 保存普通配置及隐私项的环境变量占位备份。appl
 
 
 Multi-Agent 已重构为统一 Agent 接口、独立角色实例与无状态通用执行器。协调服务只委派任务和消费结构化交付，专业 Agent 自己管理执行上下文与工具循环，支持按需替换专业实现。架构重构后103项后端测试通过，详见协作使用说明中的架构章节。
+
+
+## 会话记忆
+
+三种模式支持所属会话的近期公共对话记忆。MySQL持久化完整轮次和有限窗口，Redis缓存带版本的窗口；项目内 RedisChatMemoryStore 实现 LangChain4j ChatMemoryStore 并接入 MessageWindowChatMemory。工作台支持新建、切换、刷新恢复、历史分页、清空及删除。详见 [会话记忆使用说明](docs/会话记忆使用说明.md)。

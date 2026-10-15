@@ -4,6 +4,8 @@ import com.infi.agent.common.ApiResponse;
 import com.infi.agent.dto.ReactRunDTO;
 import com.infi.agent.security.UserPrincipal;
 import com.infi.agent.service.ReactService;
+import com.infi.agent.service.ConversationService;
+import com.infi.agent.memory.ConversationMode;
 import com.infi.agent.vo.ReactConfigVO;
 import com.infi.agent.vo.ReactRunVO;
 import jakarta.validation.Valid;
@@ -21,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class ReactController {
     private final ReactService reactService;
+    private final ConversationService conversationService;
 
     /**
      * 返回模型是否配置、可用工具及 ReAct 执行限制，不包含模型密钥。
@@ -42,6 +45,10 @@ public class ReactController {
     @PostMapping("/runs")
     public ApiResponse<ReactRunVO> run(@AuthenticationPrincipal UserPrincipal principal,
                                      @Valid @RequestBody ReactRunDTO request) {
+        if (request.conversationId() != null) {
+            return ApiResponse.success(conversationService.execute(principal.id(), request.conversationId(),
+                    ConversationMode.REACT, request.goal()));
+        }
         return ApiResponse.success(reactService.execute(principal.id(), request));
     }
 }

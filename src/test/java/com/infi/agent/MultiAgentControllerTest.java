@@ -36,6 +36,12 @@ class MultiAgentControllerTest {
     private SessionService sessionService;
     @MockitoBean
     private UserMapper userMapper;
+    @MockitoBean
+    private com.infi.agent.mapper.ConversationMapper conversationMapper;
+    @MockitoBean
+    private com.infi.agent.mapper.ConversationTurnMapper conversationTurnMapper;
+    @MockitoBean
+    private com.infi.agent.service.ConversationService conversationService;
 
     @Test
     void anonymousCannotReadConfiguration() throws Exception {

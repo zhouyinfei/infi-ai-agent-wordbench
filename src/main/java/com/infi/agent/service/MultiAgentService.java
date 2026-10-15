@@ -1,6 +1,8 @@
 package com.infi.agent.service;
 
 import com.infi.agent.dto.MultiAgentRunDTO;
+import dev.langchain4j.data.message.ChatMessage;
+import java.util.List;
 import com.infi.agent.vo.ReactConfigVO;
 import com.infi.agent.vo.ReactRunVO;
 
@@ -17,4 +19,14 @@ public interface MultiAgentService {
      * @return 最终结果、角色轨迹和累计Token用量
      */
     ReactRunVO execute(Long userId, MultiAgentRunDTO request);
+
+    /**
+     * 使用所属会话的公开历史执行任务，记忆读写由会话服务统一管理。
+     *
+     * @param userId 已认证用户
+     * @param request 当前目标
+     * @param history 已校验的近期用户消息与最终回答
+     * @return 本次执行结果
+     */
+    ReactRunVO execute(Long userId, MultiAgentRunDTO request, List<ChatMessage> history);
 }

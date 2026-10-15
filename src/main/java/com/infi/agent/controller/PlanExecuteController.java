@@ -4,6 +4,8 @@ import com.infi.agent.common.ApiResponse;
 import com.infi.agent.dto.PlanExecuteRunDTO;
 import com.infi.agent.security.UserPrincipal;
 import com.infi.agent.service.PlanExecuteService;
+import com.infi.agent.service.ConversationService;
+import com.infi.agent.memory.ConversationMode;
 import com.infi.agent.vo.ReactRunVO;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class PlanExecuteController {
     private final PlanExecuteService planExecuteService;
+    private final ConversationService conversationService;
 
     /**
      * 使用当前用户身份执行计划任务，不接受客户端指定用户或工具范围。
@@ -30,6 +33,10 @@ public class PlanExecuteController {
     @PostMapping("/runs")
     public ApiResponse<ReactRunVO> run(@AuthenticationPrincipal UserPrincipal principal,
                                       @Valid @RequestBody PlanExecuteRunDTO request) {
+        if (request.conversationId() != null) {
+            return ApiResponse.success(conversationService.execute(principal.id(), request.conversationId(),
+                    ConversationMode.PLAN_EXECUTE, request.goal()));
+        }
         return ApiResponse.success(planExecuteService.execute(principal.id(), request));
     }
 }

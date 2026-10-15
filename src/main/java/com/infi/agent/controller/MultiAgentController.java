@@ -4,6 +4,8 @@ import com.infi.agent.common.ApiResponse;
 import com.infi.agent.dto.MultiAgentRunDTO;
 import com.infi.agent.security.UserPrincipal;
 import com.infi.agent.service.MultiAgentService;
+import com.infi.agent.service.ConversationService;
+import com.infi.agent.memory.ConversationMode;
 import com.infi.agent.vo.ReactConfigVO;
 import com.infi.agent.vo.ReactRunVO;
 import jakarta.validation.Valid;
@@ -21,6 +23,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiredArgsConstructor
 public class MultiAgentController {
     private final MultiAgentService multiAgentService;
+    private final ConversationService conversationService;
 
     /** @return 不含模型凭证的公开协作配置 */
     @GetMapping("/config")
@@ -38,6 +41,10 @@ public class MultiAgentController {
     @PostMapping("/runs")
     public ApiResponse<ReactRunVO> run(@AuthenticationPrincipal UserPrincipal principal,
                                       @Valid @RequestBody MultiAgentRunDTO request) {
+        if (request.conversationId() != null) {
+            return ApiResponse.success(conversationService.execute(principal.id(), request.conversationId(),
+                    ConversationMode.MULTI_AGENT, request.goal()));
+        }
         return ApiResponse.success(multiAgentService.execute(principal.id(), request));
     }
 }

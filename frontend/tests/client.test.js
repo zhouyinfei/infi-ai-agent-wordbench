@@ -1,6 +1,6 @@
 import { beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { request, saveToken, getToken, multiAgentApi, planExecuteApi, reactApi } from '../src/api/client.js';
+import { request, saveToken, getToken, conversationApi, multiAgentApi, planExecuteApi, reactApi } from '../src/api/client.js';
 
 const memory = new Map();
 let events;
@@ -84,4 +84,24 @@ test('Multi-Agent uses its configuration and authenticated goal endpoint', async
   };
   assert.equal((await multiAgentApi.configuration()).maxIterations, 12);
   assert.equal((await multiAgentApi.run({ goal: '协作任务' })).answer, '协作结果');
+});
+
+
+test('conversation API sends authenticated create, history cursor and delete requests', async () => {
+  saveToken('conversation-token');
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    assert.equal(options.headers.Authorization, 'Bearer conversation-token');
+    calls.push({ url, method: options.method, body: options.body });
+    return { ok: true, json: async () => ({ data: {} }) };
+  };
+  await conversationApi.list();
+  await conversationApi.create('记忆');
+  await conversationApi.history('id', 10);
+  await conversationApi.clear('id');
+  await conversationApi.delete('id');
+  assert.deepEqual(calls.map(call => call.url), ['/api/conversations', '/api/conversations',
+    '/api/conversations/id/messages?beforeId=10', '/api/conversations/id/messages', '/api/conversations/id']);
+  assert.equal(calls[1].body, JSON.stringify({ title: '记忆' }));
+  assert.equal(calls[3].method, 'DELETE');
 });

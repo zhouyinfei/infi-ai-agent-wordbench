@@ -1,15 +1,25 @@
 <script setup>
-import { onMounted, onUnmounted, ref } from 'vue';
+import { nextTick, onMounted, onUnmounted, ref } from 'vue';
 import AuthPanel from './components/AuthPanel.vue';
 import ProfilePanel from './components/ProfilePanel.vue';
 import UserManagement from './components/UserManagement.vue';
 import ReactWorkbench from './components/ReactWorkbench.vue';
+import ModelToolsPanel from './components/ModelToolsPanel.vue';
 import { authApi, clearToken, getToken, saveToken, userApi } from './api/client';
 
 const user = ref(null);
 const activePage = ref('react');
 const loading = ref(true);
 const banner = ref('');
+const showHistory = ref(false);
+const workbench = ref(null);
+
+async function startNewConversation() {
+  activePage.value = 'react';
+  await nextTick();
+  workbench.value?.newConversation();
+  showHistory.value = false;
+}
 
 function resetAuth(message = '') {
   clearToken();
@@ -46,18 +56,22 @@ onUnmounted(() => window.removeEventListener('auth-expired', expired));
 <template>
   <div v-if="loading" class="loading">正在加载工作台…</div>
   <template v-else-if="!user"><div v-if="banner" class="floating-notice" role="status">{{ banner }}</div><AuthPanel @logged-in="loggedIn" /></template>
-  <div v-else class="app-shell">
+  <div v-else :class="['app-shell', { 'conversation-shell': activePage === 'react' }]">
     <header class="app-header"><div class="brand"><span class="brand-mark">A</span> Agent 工作台</div><div class="header-account"><span class="avatar">{{ user.nickname.slice(0, 1) }}</span><span>{{ user.nickname }}</span><button class="text-button" @click="logout">退出登录</button></div></header>
     <aside class="sidebar">
+      <button class="sidebar-new-chat" aria-label="新建会话" :disabled="workbench?.busy" @click="startNewConversation"><span aria-hidden="true">＋</span> 新建会话</button>
       <span class="nav-label">工作空间</span>
       <button :class="['nav-item', { active: activePage === 'react' }]" @click="activePage = 'react'"><span>◈</span> 会话工作台</button>
       <button disabled class="nav-item"><span>▤</span> 任务中心 <small>即将开放</small></button>
       <button disabled class="nav-item"><span>▧</span> 知识库 <small>即将开放</small></button>
+      <button :class="['nav-item', { active: activePage === 'models' }]" @click="activePage = 'models'"><span aria-hidden="true">◇</span> 模型与工具</button>
       <span class="nav-label section-gap">账号与管理</span>
       <button :class="['nav-item', { active: activePage === 'profile' }]" @click="activePage = 'profile'"><span>◎</span> 个人中心</button>
       <button v-if="user.role === 'ADMIN'" :class="['nav-item', { active: activePage === 'users' }]" @click="activePage = 'users'"><span>♙</span> 用户管理</button>
+      <button v-if="activePage === 'react'" class="mobile-history-toggle" :aria-expanded="showHistory" @click="showHistory = !showHistory">最近会话</button>
+      <div id="conversation-sidebar"></div>
       <div class="sidebar-footer"><span class="status-dot"></span> {{ user.role === 'ADMIN' ? '管理员工作空间' : '个人工作空间' }}</div>
     </aside>
-    <main class="workspace"><p v-if="banner" class="error" role="alert">{{ banner }}</p><ReactWorkbench v-if="activePage === 'react'" /><ProfilePanel v-else-if="activePage === 'profile'" :key="user.id" :user="user" @updated="user = $event" @password-changed="resetAuth('密码已更新，请使用新密码登录。')" /><UserManagement v-else-if="user.role === 'ADMIN'" /></main>
+    <main class="workspace"><p v-if="banner" class="error" role="alert">{{ banner }}</p><ReactWorkbench v-if="activePage === 'react'" ref="workbench" /><ModelToolsPanel v-else-if="activePage === 'models'" /><ProfilePanel v-else-if="activePage === 'profile'" :key="user.id" :user="user" @updated="user = $event" @password-changed="resetAuth('密码已更新，请使用新密码登录。')" /><UserManagement v-else-if="user.role === 'ADMIN'" /></main>
   </div>
 </template>

@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.infi.agent.mapper.ConversationMapper">
+  <update id="rename">
+    UPDATE ai_conversation SET title = #{title}, gmt_modified = CURRENT_TIMESTAMP
+    WHERE id = #{id} AND user_id = #{userId}
+  </update>
+  <sql id="metadata">id, user_id, title, memory_version, lock_token, lock_deadline, gmt_create, gmt_modified</sql>
+  <insert id="insert">
+    INSERT INTO ai_conversation (id, user_id, title, memory_json) VALUES (#{id}, #{userId}, #{title}, '[]')
+  </insert>
+  <select id="list" resultType="com.infi.agent.entity.ConversationDO">
+    SELECT <include refid="metadata"/> FROM ai_conversation WHERE user_id = #{userId}
+    ORDER BY gmt_modified DESC, id DESC LIMIT 50
+  </select>
+  <select id="selectOwned" resultType="com.infi.agent.entity.ConversationDO">
+    SELECT <include refid="metadata"/> FROM ai_conversation WHERE id = #{id} AND user_id = #{userId}
+  </select>
+  <select id="selectSnapshot" resultType="com.infi.agent.entity.ConversationDO">
+    SELECT <include refid="metadata"/>, memory_json FROM ai_conversation WHERE id = #{id} AND user_id = #{userId}
+  </select>
+  <update id="claim">
+    UPDATE ai_conversation SET lock_token = #{token}, lock_deadline = #{deadline}
+    WHERE id = #{id} AND user_id = #{userId} AND (lock_token IS NULL OR lock_deadline &lt;= #{now})
+  </update>
+  <update id="updateSnapshot">
+    UPDATE ai_conversation SET memory_json = #{json}, memory_version = memory_version + 1, gmt_modified = CURRENT_TIMESTAMP
+    WHERE id = #{id} AND user_id = #{userId} AND lock_token = #{token} AND lock_deadline &gt; #{now}
+  </update>
+  <update id="release">
+    UPDATE ai_conversation SET lock_token = NULL, lock_deadline = NULL, gmt_modified = CURRENT_TIMESTAMP
+    WHERE id = #{id} AND user_id = #{userId} AND lock_token = #{token}
+  </update>
+  <delete id="delete">
+    DELETE FROM ai_conversation WHERE id = #{id} AND user_id = #{userId}
+    AND lock_token = #{token} AND lock_deadline &gt; #{now}
+  </delete>
+</mapper>

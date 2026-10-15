@@ -41,6 +41,7 @@ public class DefaultAgentExecutor {
         List<AgentEvidence> evidence = new ArrayList<>();
         Invocation invocation = new Invocation(task, definition, context, messages, evidence);
         messages.add(SystemMessage.from(definition.systemPrompt()));
+        messages.addAll(task.conversationHistory());
         messages.add(UserMessage.from("任务数据：" + objectMapper.valueToTree(task)));
         try {
             while (true) {

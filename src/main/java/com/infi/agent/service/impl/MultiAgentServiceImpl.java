@@ -16,6 +16,7 @@ import com.infi.agent.service.MultiAgentService;
 import com.infi.agent.vo.ReactConfigVO;
 import com.infi.agent.vo.ReactRunVO;
 import com.infi.agent.vo.ReactStepVO;
+import dev.langchain4j.data.message.ChatMessage;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -53,13 +54,26 @@ public class MultiAgentServiceImpl implements MultiAgentService {
      */
     @Override
     public ReactRunVO execute(Long userId, MultiAgentRunDTO request) {
+        return execute(userId, request, List.of());
+    }
+
+    /**
+     * 接收有限的公共会话历史，系统规则和角色权限仍由服务端确定。
+     *
+     * @param userId 已认证用户
+     * @param request 当前目标
+     * @param history 近期公开对话，不含其他Agent的内部消息
+     * @return 执行结果和真实统计
+     */
+    @Override
+    public ReactRunVO execute(Long userId, MultiAgentRunDTO request, List<ChatMessage> history) {
         validateConfiguration();
         AgentExecutionContext context = new AgentExecutionContext(properties);
         if (context.maxAssignments() < 1) {
             return finish(userId, context, "LIMIT_REACHED", null, "模型预算不足以完成协作");
         }
         AgentTask planningTask = new AgentTask(0, request.goal(),
-                "最多" + context.maxAssignments() + "个任务，每个目标最多" + MAX_TASK_GOAL_LENGTH + "字。请分配角色任务。", List.of());
+                "最多" + context.maxAssignments() + "个任务，每个目标最多" + MAX_TASK_GOAL_LENGTH + "字。请分配角色任务。", List.of(), history);
         AgentResult coordination = delegate(AgentRole.COORDINATOR, planningTask, context);
         if (!coordination.successful()) {
             return stopped(userId, context, coordination);
@@ -72,7 +86,7 @@ public class MultiAgentServiceImpl implements MultiAgentService {
         }
         List<AgentResult> results = new ArrayList<>();
         for (AgentAssignment assignment : coordination.assignments()) {
-            AgentTask task = new AgentTask(results.size() + 1, request.goal(), assignment.goal(), results);
+            AgentTask task = new AgentTask(results.size() + 1, request.goal(), assignment.goal(), results, history);
             AgentResult result = delegate(assignment.agent(), task, context);
             if (!result.successful()) {
                 return stopped(userId, context, result);
@@ -81,7 +95,7 @@ public class MultiAgentServiceImpl implements MultiAgentService {
             context.recordStep(new ReactStepVO(0, task.taskNumber(), "AGENT", "SUCCESS",
                     "完成协作任务：" + task.goal(), null, null, result.result(), 0L, result.agent().displayName()));
         }
-        AgentTask reviewTask = new AgentTask(results.size() + 1, request.goal(), "核对交付结果和真实工具证据", results);
+        AgentTask reviewTask = new AgentTask(results.size() + 1, request.goal(), "核对交付结果和真实工具证据", results, history);
         AgentResult review = delegate(AgentRole.REVIEWER, reviewTask, context);
         if (!review.successful()) {
             return stopped(userId, context, review);

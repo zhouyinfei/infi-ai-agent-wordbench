@@ -49,6 +49,10 @@ app:
     max-repeated-calls: 2
     max-tasks: 4
     task-timeout: 500s
+  chat-memory:
+    max-messages: 20
+    max-characters: 32000
+    cache-ttl: 24h
   react:
     max-iterations: 6
     max-tool-calls: 10

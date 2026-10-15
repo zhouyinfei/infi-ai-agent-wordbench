@@ -18,6 +18,10 @@ const server = http.createServer((req, res) => {
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     let runCount = 0;
+    let conversationCount = 0;
+    let conversationList = [];
+    const histories = new Map();
+    page.on('dialog', dialog => dialog.accept());
     let configured = true;
     let success = true;
     let usageMode = 'complete';
@@ -30,11 +34,31 @@ const server = http.createServer((req, res) => {
       const request = route.request();
       const endpoint = new URL(request.url()).pathname;
       let data;
-      if (endpoint === '/api/auth/login') data = { token: 'test-token', user: { id: 7, username: 'alice', nickname: '研究员', role: 'USER', status: 1 } };
+      if (endpoint === '/api/auth/login') data = { token: 'test-token', user: { id: 7, username: 'alice', nickname: '研究员', role: 'ADMIN', status: 1 } };
+      else if (endpoint === '/api/conversations') {
+        if (request.method() === 'POST') {
+          const id = '00000000-0000-0000-0000-' + String(++conversationCount).padStart(12, '0');
+          data = { id, title: request.postDataJSON().title || '新会话' };
+          conversationList.unshift(data);
+          histories.set(id, []);
+        } else { data = conversationList; }
+      } else if (endpoint.startsWith('/api/conversations/')) {
+        const id = endpoint.split('/')[3];
+        if (request.method() === 'PATCH') {
+          const item = conversationList.find(item => item.id === id);
+          item.title = request.postDataJSON().title;
+          data = item;
+        } else if (request.method() === 'DELETE') {
+          histories.set(id, []);
+          if (!endpoint.endsWith('/messages')) conversationList = conversationList.filter(item => item.id !== id);
+          data = null;
+        } else { data = { records: histories.get(id) || [], nextBeforeId: null }; }
+      }
       else if (endpoint === '/api/react/config' || endpoint === '/api/multi-agent/config') data = { ...configuration(), maxIterations: endpoint === '/api/multi-agent/config' ? 12 : 6 };
       else if (endpoint === '/api/react/runs' || endpoint === '/api/plan-execute/runs' || endpoint === '/api/multi-agent/runs') {
         runCount++;
-        assert.deepEqual(Object.keys(request.postDataJSON()), ['goal']);
+        assert.deepEqual(Object.keys(request.postDataJSON()), ['goal', 'conversationId']);
+        assert.ok(histories.has(request.postDataJSON().conversationId));
         assert.equal(request.headers().authorization, 'Bearer test-token');
         data = { runId: 'react-ui-self-test', status: success ? 'SUCCEEDED' : 'LIMIT_REACHED',
           answer: success ? '128加256得到384，再乘以3，最终结果为1152。' : null,
@@ -76,7 +100,11 @@ const server = http.createServer((req, res) => {
           reportedModelCalls: usageMode === 'partial' ? data.modelCalls - 1 : data.modelCalls,
           complete: usageMode === 'complete',
         };
-      } else if (endpoint === '/api/users/me') data = { id: 7, username: 'alice', nickname: '研究员', role: 'USER', status: 1 };
+        const mode = endpoint.includes('multi-agent') ? 'MULTI_AGENT' : endpoint.includes('plan-execute') ? 'PLAN_EXECUTE' : 'REACT';
+        histories.get(request.postDataJSON().conversationId).push({
+          id: runCount, mode, goal: request.postDataJSON().goal, answer: data.answer, status: data.status,
+        });
+      } else if (endpoint === '/api/users/me') data = { id: 7, username: 'alice', nickname: '研究员', role: 'ADMIN', status: 1 };
       await route.fulfill({ json: { code: 'OK', message: '操作成功', data } });
     });
     await page.goto('http://127.0.0.1:' + server.address().port);
@@ -85,24 +113,76 @@ const server = http.createServer((req, res) => {
     await page.getByRole('button', { name: '登录', exact: true }).click();
     await page.getByRole('heading', { name: '会话工作台', exact: true }).waitFor();
     assert.equal(await page.getByRole('checkbox').count(), 0);
-    await page.getByText('Agent 会根据任务自动选择并调用可用工具，无需手动选择。', { exact: true }).waitFor();
+    assert.equal(await page.locator('.composer .mode-selector, .composer .tool-hint, .composer .mode-help').count(), 0);
+    assert.equal(await page.locator('.chat-header').getByRole('combobox', { name: '执行模式', exact: true }).count(), 1);
+    await page.getByRole('button', { name: '新建会话', exact: true }).click();
+    assert.equal(conversationCount, 0);
+    const inputBox = await page.locator('.composer').boundingBox();
+    assert.ok(inputBox.height <= 100, '输入区应保持紧凑');
+    assert.ok((await page.locator('.app-header').boundingBox()).height <= 50, '顶部导航应保持紧凑');
+    const sendButton = await page.getByRole('button', { name: '发送', exact: true }).boundingBox();
+    assert.ok(sendButton.width <= 100 && sendButton.height <= 40);
+    assert.ok(sendButton.x >= inputBox.x && sendButton.y >= inputBox.y
+      && sendButton.x + sendButton.width <= inputBox.x + inputBox.width
+      && sendButton.y + sendButton.height <= inputBox.y + inputBox.height);
+    assert.equal(await page.locator('#conversation-sidebar .model-settings').count(), 0);
+    assert.equal(await page.locator('#conversation-sidebar').getByRole('button', { name: '新建会话', exact: true }).count(), 0);
+    await page.getByRole('button', { name: '模型与工具', exact: true }).click();
+    await page.getByRole('heading', { name: '模型与工具', exact: true }).waitFor();
+    await page.getByText('最多模型调用', { exact: true }).waitFor();
+    await page.getByText('calculator', { exact: true }).waitFor();
+    await page.getByRole('button', { name: '新建会话', exact: true }).click();
+    await page.getByRole('heading', { name: '会话工作台', exact: true }).waitFor();
     await page.getByRole('button', { name: '多步计算' }).click();
-    await page.getByRole('button', { name: '开始执行' }).click();
+    await page.getByLabel('任务目标', { exact: true }).fill('先计算128加256，再将结果乘以3');
+    await page.getByRole('button', { name: '发送' }).click();
+    await page.locator('.execution-details > summary').waitFor();
+    await page.locator('.execution-details:not([open]) > summary').click();
     await page.getByRole('heading', { name: '执行完成', exact: true }).waitFor();
-    await page.getByText('128加256得到384，再乘以3，最终结果为1152。', { exact: true }).waitFor();
+    await page.locator('.react-answer').filter({ hasText: '最终结果为1152' }).waitFor();
+    await page.locator('.conversation-history').waitFor();
+    const firstConversationId = await page.locator('[aria-label="当前会话"]').inputValue();
+    assert.equal(conversationList[0].title, '先计算128加256，再将结果乘以3');
+    assert.equal(await page.locator('.recent-item.selected').textContent(), conversationList[0].title);
     assert.equal(runCount, 1);
+    await page.getByTestId('run-token-summary').filter({ hasText: '45 Token' }).waitFor();
+{
+    const rowBeforeMenu = await page.locator('.recent-row.selected').boundingBox();
+    await page.getByLabel('会话操作', { exact: true }).click();
+    const rowAfterMenu = await page.locator('.recent-row.selected').boundingBox();
+    assert.equal(rowAfterMenu.height, rowBeforeMenu.height, '菜单不能改变会话行高');
+    assert.equal(rowAfterMenu.width, rowBeforeMenu.width, '菜单不能改变会话行宽');
+    await page.getByRole('button', { name: '修改标题', exact: true }).click();
+}
+    await page.getByLabel('会话标题', { exact: true }).fill('我的计算任务');
+    await page.getByRole('button', { name: '保存标题', exact: true }).click();
+    await page.locator('.chat-header strong').filter({ hasText: '我的计算任务' }).waitFor();
+    assert.equal(await page.locator('.react-answer').count(), 1);
     await page.getByTestId('token-usage-status').filter({ hasText: '统计完整' }).waitFor();
     assert.equal(await page.getByText('总 Token', { exact: true }).locator('xpath=following-sibling::dd[1]').textContent(), '45');
     assert.equal(await page.locator('.react-step').count(), 5);
+    assert.equal(await page.locator('.react-answer').count(), 1);
+    assert.equal(await page.getByLabel('任务目标', { exact: true }).inputValue(), '');
+    await page.locator('.execution-details > summary').click();
+    const composerRect = await page.locator('.composer').boundingBox();
+    assert.ok(composerRect.y + composerRect.height <= 1000);
+    const historyRect = await page.locator('.recent-conversations').boundingBox();
+    assert.ok(historyRect.x < 260 && historyRect.y > 400);
     await page.screenshot({ path: 'docs/images/react-workbench-v1.png', fullPage: true });
     success = false;
-    await page.getByRole('button', { name: '开始执行' }).click();
+    await page.getByLabel('任务目标', { exact: true }).fill('先计算128加256，再将结果乘以3');
+    await page.getByRole('button', { name: '发送' }).click();
+    await page.locator('.execution-details > summary').waitFor();
+    await page.locator('.execution-details:not([open]) > summary').click();
     await page.getByRole('heading', { name: '达到执行上限', exact: true }).waitFor();
     await page.getByText('达到模型迭代次数上限').waitFor();
     success = true;
-    await page.getByRole('combobox').selectOption('PLAN_EXECUTE');
+    await page.getByRole('combobox', { name: '执行模式', exact: true }).selectOption('PLAN_EXECUTE');
     assert.equal(await page.locator('.react-step').count(), 0);
-    await page.getByRole('button', { name: '开始执行' }).click();
+    await page.getByLabel('任务目标', { exact: true }).fill('先计算128加256，再将结果乘以3');
+    await page.getByRole('button', { name: '发送' }).click();
+    await page.locator('.execution-details > summary').waitFor();
+    await page.locator('.execution-details:not([open]) > summary').click();
     await page.getByRole('heading', { name: '执行计划', exact: true }).waitFor();
     assert.equal(await page.locator('.plan-list li').count(), 2);
     assert.equal(await page.locator('.plan-list .success').count(), 2);
@@ -110,18 +190,27 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.getByText('总 Token', { exact: true }).locator('xpath=following-sibling::dd[1]').textContent(), '90');
     await page.screenshot({ path: 'docs/images/plan-execute-workbench-v1.png', fullPage: true });
     usageMode = 'partial';
-    await page.getByRole('button', { name: '开始执行' }).click();
+    await page.getByLabel('任务目标', { exact: true }).fill('先计算128加256，再将结果乘以3');
+    await page.getByRole('button', { name: '发送' }).click();
+    await page.locator('.execution-details > summary').waitFor();
+    await page.locator('.execution-details:not([open]) > summary').click();
     await page.getByTestId('token-usage-status').filter({ hasText: '部分统计' }).waitFor();
     usageMode = 'none';
-    await page.getByRole('button', { name: '开始执行' }).click();
+    await page.getByLabel('任务目标', { exact: true }).fill('先计算128加256，再将结果乘以3');
+    await page.getByRole('button', { name: '发送' }).click();
+    await page.locator('.execution-details > summary').waitFor();
+    await page.locator('.execution-details:not([open]) > summary').click();
     await page.getByTestId('token-usage-status').filter({ hasText: '未返回' }).waitFor();
     assert.equal(await page.getByText('总 Token', { exact: true }).locator('xpath=following-sibling::dd[1]').textContent(), '未提供');
     await page.setViewportSize({ width: 390, height: 844 });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
     usageMode = 'complete';
     await page.setViewportSize({ width: 1440, height: 1000 });
-    await page.getByRole('combobox').selectOption('MULTI_AGENT');
-    await page.getByRole('button', { name: '开始执行' }).click();
+    await page.getByRole('combobox', { name: '执行模式', exact: true }).selectOption('MULTI_AGENT');
+    await page.getByLabel('任务目标', { exact: true }).fill('先计算128加256，再将结果乘以3');
+    await page.getByRole('button', { name: '发送' }).click();
+    await page.locator('.execution-details > summary').waitFor();
+    await page.locator('.execution-details:not([open]) > summary').click();
     await page.getByRole('heading', { name: '协作分工', exact: true }).waitFor();
     assert.equal(await page.locator('.collaboration-list li').count(), 2);
     assert.equal(await page.locator('.agent-role').count(), 4);
@@ -129,23 +218,77 @@ const server = http.createServer((req, res) => {
     assert.equal(await page.getByText('总 Token', { exact: true }).locator('xpath=following-sibling::dd[1]').textContent(), '105');
     await page.screenshot({ path: 'docs/images/multi-agent-workbench-v1.png', fullPage: true });
     multiReviewApproved = false;
-    await page.getByRole('button', { name: '开始执行' }).click();
+    await page.getByLabel('任务目标', { exact: true }).fill('先计算128加256，再将结果乘以3');
+    await page.getByRole('button', { name: '发送' }).click();
+    await page.locator('.execution-details > summary').waitFor();
+    await page.locator('.execution-details:not([open]) > summary').click();
     await page.getByRole('heading', { name: '执行失败', exact: true }).waitFor();
     await page.getByText('审校未通过：结果缺少证据', { exact: true }).waitFor();
     assert.equal(await page.locator('.collaboration-list .success').count(), 2);
     await page.setViewportSize({ width: 390, height: 844 });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
+    await page.getByRole('button', { name: '最近会话', exact: true }).click();
+    await page.getByRole('button', { name: '新建会话', exact: true }).click();
+    await page.waitForFunction(() => !document.querySelector('.conversation-history'));
+    assert.equal(await page.getByLabel('任务目标', { exact: true }).inputValue(), '');
+    await page.getByRole('button', { name: '最近会话', exact: true }).click();
+    await page.locator('.recent-item').filter({ hasText: '我的计算任务' }).click();
+    await page.locator('.conversation-history').waitFor();
+    assert.ok(await page.locator('.conversation-turn').count() > 1);
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.reload();
+    await page.getByRole('heading', { name: '会话工作台', exact: true }).waitFor();
+    await page.locator('.recent-item').filter({ hasText: '我的计算任务' }).click();
+    await page.locator('.conversation-history').waitFor();
+    // 覆盖管理员导航、多条历史和矮窗口：列表必须滚动，不能盖住操作按钮。
+    for (let index = 0; index < 40; index++) {
+      const id = '00000000-0000-0000-0000-' + String(++conversationCount).padStart(12, '0');
+      conversationList.push({ id, title: '历史会话 ' + index });
+      histories.set(id, []);
+    }
+    await page.reload();
+    await page.locator('.recent-item').filter({ hasText: '我的计算任务' }).click();
+    for (const viewport of [{ width: 1325, height: 700 }, { width: 900, height: 650 }]) {
+      await page.setViewportSize(viewport);
+      const list = await page.locator('.recent-list').boundingBox();
+      const clear = await page.getByRole('button', { name: '清空会话', exact: true }).boundingBox();
+      assert.ok(list.height > 20 && list.y + list.height <= clear.y, '会话列表不应覆盖清空按钮');
+      assert.equal(await page.getByLabel('会话操作', { exact: true }).count(), 1);
+      assert.ok(await page.locator('.recent-list').evaluate(element => element.scrollHeight > element.clientHeight));
+  {
+    const rowBeforeMenu = await page.locator('.recent-row.selected').boundingBox();
+    await page.getByLabel('会话操作', { exact: true }).click();
+    const rowAfterMenu = await page.locator('.recent-row.selected').boundingBox();
+    assert.equal(rowAfterMenu.height, rowBeforeMenu.height, '菜单不能改变会话行高');
+    assert.equal(rowAfterMenu.width, rowBeforeMenu.width, '菜单不能改变会话行宽');
+    await page.getByRole('button', { name: '修改标题', exact: true }).click();
+}
+      const editor = await page.locator('.title-editor').boundingBox();
+      const actions = await page.locator('.session-panel > .session-actions').boundingBox();
+      assert.ok(editor.y + editor.height <= actions.y, '改名表单不应覆盖清空和删除按钮');
+      await page.getByRole('button', { name: '取消', exact: true }).click();
+    }
+    await page.setViewportSize({ width: 1325, height: 700 });
+    await page.screenshot({ path: 'docs/images/sidebar-layout-regression.png', fullPage: true });
+    await page.setViewportSize({ width: 1440, height: 1000 });
+    await page.getByRole('button', { name: '清空会话', exact: true }).click();
+    await page.waitForFunction(() => !document.querySelector('.conversation-history'));
+    await page.getByLabel('会话操作', { exact: true }).click();
+    await page.getByRole('button', { name: '删除会话', exact: true }).click();
+    await page.waitForFunction(() => document.querySelector('[aria-label="当前会话"]').value === '');
     configured = false;
     await page.getByRole('button', { name: '个人中心' }).click();
     await page.getByRole('button', { name: '会话工作台' }).click();
     await page.getByText('模型尚未配置', { exact: false }).waitFor();
-    assert.ok(await page.getByRole('button', { name: '开始执行' }).isDisabled());
+    assert.ok(await page.getByRole('button', { name: '发送' }).isDisabled());
     await page.setViewportSize({ width: 390, height: 844 });
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth));
     assert.deepEqual(errors, []);
-    console.log('Agent browser smoke passed: ReAct/Plan-and-Execute/Multi-Agent, role handoffs, review rejection, token totals, complete/partial/missing usage, budget stop, unconfigured model, mobile layout. API responses simulated.');
+    console.log('Conversation browser smoke passed: new/switch/reload/clear/delete/history; Agent modes: ReAct/Plan-and-Execute/Multi-Agent, role handoffs, review rejection, token totals, complete/partial/missing usage, budget stop, unconfigured model, mobile layout. API responses simulated.');
   } finally {
     await browser.close();
     await new Promise(resolve => server.close(resolve));
   }
 })().catch(error => { console.error(error); server.close(); process.exitCode = 1; });
+
+

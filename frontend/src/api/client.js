@@ -63,3 +63,13 @@ export const multiAgentApi = {
   configuration: () => request('/multi-agent/config'),
   run: (data) => request('/multi-agent/runs', { method: 'POST', body: JSON.stringify(data) }),
 };
+
+
+export const conversationApi = {
+  rename: (id, title) => request('/conversations/' + id, { method: 'PATCH', body: JSON.stringify({ title }) }),
+  list: () => request('/conversations'),
+  create: (title = '新会话') => request('/conversations', { method: 'POST', body: JSON.stringify({ title }) }),
+  history: (id, beforeId) => request('/conversations/' + id + '/messages' + (beforeId ? '?beforeId=' + beforeId : '')),
+  clear: (id) => request('/conversations/' + id + '/messages', { method: 'DELETE' }),
+  delete: (id) => request('/conversations/' + id, { method: 'DELETE' }),
+};

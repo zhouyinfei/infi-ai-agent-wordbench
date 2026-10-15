@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.infi.agent.mapper.ConversationTurnMapper">
+  <insert id="insert">
+    INSERT INTO ai_conversation_turn (conversation_id, mode, goal, answer, status, result_json)
+    SELECT #{turn.conversationId}, #{turn.mode}, #{turn.goal}, #{turn.answer}, #{turn.status}, #{turn.resultJson}
+    FROM ai_conversation WHERE id = #{turn.conversationId} AND user_id = #{userId}
+    AND lock_token = #{token} AND lock_deadline &gt; #{now}
+  </insert>
+  <select id="history" resultType="com.infi.agent.entity.ConversationTurnDO">
+    SELECT t.id, t.conversation_id, t.mode, t.goal, t.answer, t.status, t.gmt_create
+    FROM ai_conversation_turn t JOIN ai_conversation c ON c.id = t.conversation_id
+    WHERE c.id = #{id} AND c.user_id = #{userId}
+    <if test="beforeId != null">AND t.id &lt; #{beforeId}</if>
+    ORDER BY t.id DESC LIMIT 51
+  </select>
+  <delete id="delete">DELETE FROM ai_conversation_turn WHERE conversation_id = #{id}</delete>
+</mapper>

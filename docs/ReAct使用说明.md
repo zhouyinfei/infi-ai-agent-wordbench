@@ -134,3 +134,8 @@ controller/ReactController → service/ReactService → service/impl/ReactServic
 执行结果增加 tokenUsage：inputTokens（输入）、outputTokens（输出）、totalTokens（总数）、reportedModelCalls（返回用量的调用数）、complete（统计是否完整）。工作台在“本次执行”显示累计用量。所有模型调用均计入，包括规划、工具观察反馈后的再次调用和汇总；工具自身不产生模型 token。
 
 只统计模型服务在响应中返回的用量；总数缺失而输入与输出都已提供时，将两者相加。不估算未返回的消费，缺失字段为 null，页面显示“未提供”。部分调用未返回用量或请求失败时，显示部分统计及报告覆盖次数，已知累计值可能低于实际消耗。未调用模型时为0。此统计不是费用或账单，未额外计算缓存和推理 token 明细。
+
+
+## 会话记忆阶段更新
+
+ReAct现已接入MySQL/Redis公共会话记忆。请求可提供conversationId继续对话，省略时保持独立执行。此前的“无跨任务记忆”描述为历史阶段范围，当前行为见 [会话记忆说明](会话记忆使用说明.md)。
