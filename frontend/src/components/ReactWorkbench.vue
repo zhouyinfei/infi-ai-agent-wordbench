@@ -19,7 +19,7 @@ const mode = ref('REACT');
 const modeLabels = { REACT: 'ReAct', PLAN_EXECUTE: 'Plan-and-Execute', MULTI_AGENT: 'Multi-Agent' };
 const modeLabel = computed(() => modeLabels[mode.value]);
 const assignments = computed(() => result.value?.steps.find(step => step.type === 'COORDINATE' && step.summary === '协作分工')?.arguments || []);
-const agentLabels = { CALCULATOR: '计算 Agent', TIME: '时间 Agent', ANALYST: '分析 Agent' };
+const agentLabels = { CALCULATOR: '计算 Agent', TIME: '时间 Agent', FILE: '文件 Agent', NETWORK: '联网 Agent', ANALYST: '分析 Agent' };
 const plan = computed(() => result.value?.steps.find(step => step.type === 'PLAN' && step.summary === '执行计划')?.arguments || []);
 const tokenCount = value => value == null ? '未提供' : value.toLocaleString();
 const stepLabels = { PLAN: '生成计划', MODEL: '模型判断', TOOL: '工具执行', STEP: '步骤完成', FINAL: '汇总回答', COORDINATE: '协调分工', AGENT: '专业执行', REVIEW: '独立审校' };

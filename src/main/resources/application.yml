@@ -28,6 +28,11 @@ mybatis:
   configuration:
     map-underscore-to-camel-case: true
 app:
+  tools:
+    files:
+      root: ${TOOL_FILES_ROOT:./tool-workspace}
+    http:
+      allowed-hosts: ${TOOL_HTTP_ALLOWED_HOSTS:www.weather.com.cn,api.open-meteo.com}
   auth:
     token-ttl: 8h
     login-window: 15m

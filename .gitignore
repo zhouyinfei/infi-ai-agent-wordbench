@@ -6,3 +6,4 @@ frontend/dist/
 *.log
 src/main/resources/application-local.yml
 .tools/
+tool-workspace/

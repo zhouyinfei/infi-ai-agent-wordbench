@@ -15,7 +15,7 @@ import org.springframework.stereotype.Component;
 /** 统一白名单及参数解析；调用失败转换为可反馈给模型的观察。 */
 @Component
 public class ReactToolRegistry {
-    private static final int MAX_ARGUMENT_LENGTH = 2000;
+    private static final int MAX_ARGUMENT_LENGTH = 400_000;
     private final Map<String, ReactTool> tools = new LinkedHashMap<>();
     private final ObjectMapper objectMapper;
 
