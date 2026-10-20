@@ -51,10 +51,12 @@ app:
           - calculator
           - current_time
   tools:
+    search:
+      enabled: ${TOOL_SEARCH_ENABLED:true}
+      api-key: ${TAVILY_API_KEY:}
+      max-results: ${TOOL_SEARCH_MAX_RESULTS:5}
     files:
       root: ${TOOL_FILES_ROOT:./tool-workspace}
-    http:
-      allowed-hosts: ${TOOL_HTTP_ALLOWED_HOSTS:www.weather.com.cn,api.open-meteo.com,wttr.in}
   auth:
     token-ttl: 8h
     login-window: 15m

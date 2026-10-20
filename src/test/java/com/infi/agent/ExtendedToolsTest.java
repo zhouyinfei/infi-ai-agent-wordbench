@@ -16,7 +16,7 @@ class ExtendedToolsTest {
         ToolFileStore store = new ToolFileStore(directory.toString());
         return new ReactToolRegistry(List.of(new FileCreateTool(store), new FileReadTool(store),
                 new FileWriteTool(store), new FileDeleteTool(store), new FileListTool(store),
-                new HttpGetTool("localhost,127.0.0.1")), new ObjectMapper());
+                new HttpGetTool()), new ObjectMapper());
     }
 
     private ReactToolRegistry.ToolObservation call(ReactToolRegistry registry, String name, String json) {
@@ -52,10 +52,10 @@ class ExtendedToolsTest {
         assertThat(call(registry(), "file_read", "{\"path\":\"a\",\"extra\":true}").success()).isFalse();
     }
 
-    @Test void networkRejectsUnconfiguredHostsLocalAddressesAndInvalidUrls() {
+    @Test void networkRejectsLocalAddressesAndInvalidUrls() {
         var registry = registry();
         for (String url : List.of("file:///etc/passwd", "http://localhost/", "http://127.0.0.1/",
-                "https://example.com/", "http://localhost:8080/", "http://user:pass@localhost/")) {
+                "http://10.0.0.1/", "http://192.168.1.1/", "http://localhost:8080/", "http://user:pass@localhost/")) {
             assertThat(call(registry, "http_get", "{\"url\":\"" + url + "\"}").success()).as(url).isFalse();
         }
     }

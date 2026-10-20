@@ -70,8 +70,14 @@ async function loadConfig() {
   finally { loading.value = false; }
 }
 
+function handleComposerKeydown(event) {
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing || event.keyCode === 229) return;
+  event.preventDefault();
+  if (!event.repeat) event.currentTarget.form.requestSubmit();
+}
+
 async function execute() {
-  if (running.value) return;
+  if (running.value || loading.value) return;
   if (!goal.value.trim() || !config.value?.configured || conversationLoading.value) return;
   submittedGoal.value = goal.value;
   running.value = true;
@@ -214,7 +220,7 @@ onMounted(() => { loadConfig(); loadConversations(); });
       </div></details></div>
       </div>
       <form class="composer" @submit.prevent="execute">
-        <textarea v-model="goal" required maxlength="2000" rows="1" :disabled="running" aria-label="任务目标" placeholder="输入你的问题或任务，也可以接着上一次回答追问…"></textarea>
+        <textarea v-model="goal" required maxlength="2000" rows="1" :disabled="running" aria-label="任务目标" placeholder="输入你的问题或任务，也可以接着上一次回答追问…" @keydown="handleComposerKeydown"></textarea>
         <button class="primary send-button" type="submit" :disabled="running || loading || conversationLoading || !config?.configured || !goal.trim()"><span aria-hidden="true">➤</span>{{ running ? '执行中…' : '发送' }}</button>
       </form>
     </section>
