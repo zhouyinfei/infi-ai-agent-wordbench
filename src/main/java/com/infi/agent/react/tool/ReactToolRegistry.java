@@ -4,12 +4,15 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.infi.agent.mcp.McpToolCatalog;
 import com.infi.agent.vo.ReactToolVO;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Stream;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /** 统一白名单及参数解析；调用失败转换为可反馈给模型的观察。 */
@@ -18,6 +21,18 @@ public class ReactToolRegistry {
     private static final int MAX_ARGUMENT_LENGTH = 400_000;
     private final Map<String, ReactTool> tools = new LinkedHashMap<>();
     private final ObjectMapper objectMapper;
+
+    /**
+     * 合并内置工具与已授权的 MCP 工具，沿用统一白名单和参数校验。
+     *
+     * @param toolList 内置工具
+     * @param objectMapper 参数解析器
+     * @param catalog MCP 工具目录
+     */
+    @Autowired
+    public ReactToolRegistry(List<ReactTool> toolList, ObjectMapper objectMapper, McpToolCatalog catalog) {
+        this(Stream.concat(toolList.stream(), catalog.tools().stream()).toList(), objectMapper);
+    }
 
     /**
      * 注册 Spring 提供的工具实例，按注解生成的工具名称建立服务端白名单。

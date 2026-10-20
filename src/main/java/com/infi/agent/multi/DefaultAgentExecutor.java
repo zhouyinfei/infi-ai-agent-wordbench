@@ -73,7 +73,7 @@ public class DefaultAgentExecutor {
                 .maxOutputTokens(MAX_OUTPUT_TOKENS);
         if (invocation.definition().withTools()) {
             builder.toolSpecifications(toolRegistry.specifications().stream()
-                    .filter(tool -> invocation.definition().role().tools().contains(tool.name())).toList());
+                    .filter(tool -> invocation.definition().role().allowsTool(tool.name())).toList());
         }
         ChatResponse response;
         try {
@@ -113,7 +113,7 @@ public class DefaultAgentExecutor {
         for (ToolExecutionRequest call : calls) {
             invocation.context().beginToolCall(call);
             long started = System.nanoTime();
-            ReactToolRegistry.ToolObservation observation = invocation.definition().role().tools().contains(call.name())
+            ReactToolRegistry.ToolObservation observation = invocation.definition().role().allowsTool(call.name())
                     ? toolRegistry.execute(call)
                     : new ReactToolRegistry.ToolObservation(false, null, "工具不在当前Agent的授权范围内");
             invocation.evidence().add(new AgentEvidence(call.name(), observation.arguments(),

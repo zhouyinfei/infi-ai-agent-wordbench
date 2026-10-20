@@ -50,6 +50,12 @@ application.yml 保存普通配置及隐私项的环境变量占位备份。appl
 
 详见 [需求文档](docs/需求文档.md) 与 [用户系统接口](docs/用户系统接口.md)。后续按阶段实现 Agent 能力。
 
+## MCP 工具接入
+
+支持通过 Streamable HTTP 或 stdio 连接可信 MCP 服务器，配置工具白名单后自动接入 ReAct、Plan-and-Execute 和 Multi-Agent。默认关闭，配置与使用方式见 [MCP 使用说明](docs/MCP使用说明.md)。
+
+项目自带独立 stdio MCP 服务端，开放计算和时间工具。执行 `mvn package` 后通过 `java -jar target/infi-ai-agent-0.1.0-mcp-stdio.jar` 启动，详见 [stdio MCP 服务端使用说明](docs/stdio-MCP服务端使用说明.md)。
+
 ## ReAct
 
 新增文件创建、读取、覆盖写入、删除、目录浏览与 HTTP GET 工具；三种模式均已接入。配置和使用边界见 [工具使用说明](docs/工具使用说明.md)。

@@ -28,11 +28,33 @@ mybatis:
   configuration:
     map-underscore-to-camel-case: true
 app:
+  mcp:
+    enabled: true
+    timeout: 30s
+    servers:
+      # 远程 MCP 配置示例，需要时取消注释并填写实际端点及凭证。
+      # - name: knowledge
+      #   transport: STREAMABLE_HTTP
+      #   url: http://127.0.0.1:3001/mcp
+      #   headers:
+      #     Authorization: Bearer ${KNOWLEDGE_MCP_TOKEN}
+      #   allowed-tools:
+      #     - search
+      - name: local
+        transport: STDIO
+        # 复用当前后端的 Java 运行时；首次启动前执行 mvn package 生成服务端 JAR。
+        command:
+          - ${java.home}/bin/java
+          - -jar
+          - ${MCP_STDIO_JAR:${user.dir}/target/infi-ai-agent-0.1.0-mcp-stdio.jar}
+        allowed-tools:
+          - calculator
+          - current_time
   tools:
     files:
       root: ${TOOL_FILES_ROOT:./tool-workspace}
     http:
-      allowed-hosts: ${TOOL_HTTP_ALLOWED_HOSTS:www.weather.com.cn,api.open-meteo.com}
+      allowed-hosts: ${TOOL_HTTP_ALLOWED_HOSTS:www.weather.com.cn,api.open-meteo.com,wttr.in}
   auth:
     token-ttl: 8h
     login-window: 15m
