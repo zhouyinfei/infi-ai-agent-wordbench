@@ -1,8 +1,30 @@
 import { beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { request, saveToken, getToken, conversationApi, multiAgentApi, planExecuteApi, reactApi } from '../src/api/client.js';
+import { request, saveToken, getToken, conversationApi, multiAgentApi, planExecuteApi, reactApi, knowledgeApi } from '../src/api/client.js';
 
 const memory = new Map();
+
+test('knowledge upload sends multipart without forcing JSON content type', async () => {
+  saveToken('rag-token');
+  globalThis.fetch = async (url, options) => {
+    assert.equal(url, '/api/knowledge/documents');
+    assert.equal(options.headers.Authorization, 'Bearer rag-token');
+    assert.equal(options.headers['Content-Type'], undefined);
+    assert.ok(options.body instanceof FormData);
+    assert.equal(options.body.get('file').name, 'test.md');
+    return { ok: true, json: async () => ({ data: { id: 'document-id' } }) };
+  };
+  assert.deepEqual(await knowledgeApi.upload(new File(['content'], 'test.md')), { id: 'document-id' });
+});
+
+test('knowledge search sends query and limit without user supplied identity', async () => {
+  globalThis.fetch = async (url, options) => {
+    assert.equal(url, '/api/knowledge/search');
+    assert.deepEqual(JSON.parse(options.body), { query: '问题', limit: 3 });
+    return { ok: true, json: async () => ({ data: [] }) };
+  };
+  assert.deepEqual(await knowledgeApi.search('问题', 3), []);
+});
 let events;
 beforeEach(() => {
   memory.clear();

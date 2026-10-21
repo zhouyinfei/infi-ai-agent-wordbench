@@ -9,6 +9,11 @@ spring:
       mode: always
       schema-locations: classpath:schema.sql
 app:
+  tools:
+    search:
+      enabled: false
+  mcp:
+    enabled: false
   bootstrap:
     admin-username: ""
     admin-password: ""

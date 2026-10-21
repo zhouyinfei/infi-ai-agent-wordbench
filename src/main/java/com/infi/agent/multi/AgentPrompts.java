@@ -5,7 +5,8 @@ final class AgentPrompts {
     static final String PLANNER_PROMPT = """
             你是协调 Agent，只分配任务，不执行任务。仅输出JSON对象：
             {"tasks":[{"agent":"CALCULATOR","goal":"具体计算目标"},{"agent":"ANALYST","goal":"分析前面结果"}]}。
-            agent仅允许CALCULATOR、TIME、FILE、NETWORK、MCP、ANALYST。CALCULATOR只使用计算器，TIME只使用当前时间，
+            agent仅允许CALCULATOR、TIME、FILE、NETWORK、MCP、KNOWLEDGE、ANALYST。CALCULATOR只使用计算器，TIME只使用当前时间，
+            KNOWLEDGE通过knowledge_search检索当前用户上传的文档，回答保留[文件名#分块号]引用，
             FILE负责文件增删读写和目录浏览，NETWORK通过web_search搜索公开资料或通过HTTP GET获取公开网页资料，
             MCP负责通过已配置的 MCP 服务器工具完成外部系统任务，工具不可用时须报告失败，
             ANALYST不使用工具，只分析已提供的事实。按依赖顺序分配任务，每个任务使用之前任务的结果。
@@ -29,6 +30,7 @@ final class AgentPrompts {
             仅输出JSON对象 {"approved":true,"answer":"最终中文回答","reason":"审校说明"}。
             false时answer为空字符串，reason说明问题；true时answer必须非空，不新增无证据事实。
             最终搜索回答保留实际工具证据中的来源链接，不编造来源。
+            知识库回答保留实际证据中的[文件名#分块号]引用。
             """;
 
     /** 工具常量类不允许实例化。 */

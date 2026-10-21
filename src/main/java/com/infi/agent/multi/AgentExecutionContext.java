@@ -1,5 +1,6 @@
 package com.infi.agent.multi;
 
+import com.infi.agent.react.tool.KnowledgeSearchScope;
 import com.infi.agent.config.MultiAgentProperties;
 import com.infi.agent.react.model.TokenUsageTracker;
 import com.infi.agent.vo.ReactRunVO;
@@ -15,6 +16,7 @@ import java.util.UUID;
 
 /** 单次同步协作的共享预算和轨迹，不保存角色或任何Agent的模型对话。 */
 public class AgentExecutionContext {
+    private final KnowledgeSearchScope knowledgeScope;
     private final String runId = UUID.randomUUID().toString();
     private final long started = System.nanoTime();
     private final Duration timeout;
@@ -34,11 +36,24 @@ public class AgentExecutionContext {
      * @param properties 服务端协作配置
      */
     public AgentExecutionContext(MultiAgentProperties properties) {
+        this(properties, new KnowledgeSearchScope(
+                KnowledgeSearchScope.DEFAULT_MAX_SEARCHES));
+    }
+
+    /** 创建整次协作共享的检索缓存及预算，不随角色切换重置。 */
+    public AgentExecutionContext(MultiAgentProperties properties,
+                                 KnowledgeSearchScope knowledgeScope) {
+        this.knowledgeScope = knowledgeScope;
         timeout = properties.getTaskTimeout();
         maxModelCalls = properties.getMaxIterations();
         maxToolCalls = properties.getMaxToolCalls();
         maxRepeatedCalls = properties.getMaxRepeatedCalls();
         maxAssignments = Math.min(properties.getMaxTasks(), maxModelCalls - 2);
+    }
+
+    /** @return 所有专业任务共享的本次检索上下文 */
+    public KnowledgeSearchScope knowledgeScope() {
+        return knowledgeScope;
     }
 
     /** @return 当前预算允许的专业任务数量 */
@@ -94,7 +109,8 @@ public class AgentExecutionContext {
         remaining();
         checkToolCapacity(1);
         String signature = call.name() + ":" + call.arguments();
-        if (repetitions.merge(signature, 1, Integer::sum) > maxRepeatedCalls) {
+        if (!KnowledgeSearchScope.TOOL_NAME.equals(call.name())
+                && repetitions.merge(signature, 1, Integer::sum) > maxRepeatedCalls) {
             throw new AgentExecutionException("LIMIT_REACHED", "重复调用相同工具参数，已停止无进展循环");
         }
         toolCalls++;

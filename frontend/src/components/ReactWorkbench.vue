@@ -1,14 +1,28 @@
 <script setup>
-import { computed, nextTick, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
 import { conversationApi, multiAgentApi, planExecuteApi, reactApi } from '../api/client';
 
 const thread = ref(null);
 const submittedGoal = ref('');
 const editingTitle = ref(false);
+const editingConversationId = ref('');
 const titleDraft = ref('');
 const savingTitle = ref(false);
 const config = ref(null);
 const goal = ref('');
+const useKnowledge = ref(false);
+const useNetwork = ref(false);
+const composerInput = ref(null);
+
+function resizeComposer() {
+  const input = composerInput.value;
+  if (!input) return;
+  const maxHeight = Math.max(80, Math.min(320, Math.floor(window.innerHeight * 0.4)));
+  input.style.height = '0px';
+  input.style.height = Math.max(80, Math.min(input.scrollHeight, maxHeight)) + 'px';
+  input.style.overflowY = input.scrollHeight > maxHeight ? 'auto' : 'hidden';
+}
+watch(goal, resizeComposer, { flush: 'post' });
 const conversationId = ref('');
 const conversations = ref([]);
 const conversationHistory = ref([]);
@@ -19,7 +33,7 @@ const mode = ref('REACT');
 const modeLabels = { REACT: 'ReAct', PLAN_EXECUTE: 'Plan-and-Execute', MULTI_AGENT: 'Multi-Agent' };
 const modeLabel = computed(() => modeLabels[mode.value]);
 const assignments = computed(() => result.value?.steps.find(step => step.type === 'COORDINATE' && step.summary === '协作分工')?.arguments || []);
-const agentLabels = { CALCULATOR: '计算 Agent', TIME: '时间 Agent', FILE: '文件 Agent', NETWORK: '联网 Agent', MCP: 'MCP Agent', ANALYST: '分析 Agent' };
+const agentLabels = { CALCULATOR: '计算 Agent', TIME: '时间 Agent', FILE: '文件 Agent', NETWORK: '联网 Agent', MCP: 'MCP Agent', KNOWLEDGE: '知识库 Agent', ANALYST: '分析 Agent' };
 const plan = computed(() => result.value?.steps.find(step => step.type === 'PLAN' && step.summary === '执行计划')?.arguments || []);
 const tokenCount = value => value == null ? '未提供' : value.toLocaleString();
 const stepLabels = { PLAN: '生成计划', MODEL: '模型判断', TOOL: '工具执行', STEP: '步骤完成', FINAL: '汇总回答', COORDINATE: '协调分工', AGENT: '专业执行', REVIEW: '独立审校' };
@@ -33,10 +47,13 @@ const menuPosition = ref({});
 
 function positionConversationMenu(event) {
   if (!event.currentTarget.open) return;
+  event.currentTarget.closest('.recent-list').querySelectorAll('details[open]').forEach(menu => {
+    if (menu !== event.currentTarget) menu.removeAttribute('open');
+  });
   const bounds = event.currentTarget.querySelector('summary').getBoundingClientRect();
   menuPosition.value = {
     left: Math.max(8, Math.min(bounds.right - 140, window.innerWidth - 148)) + 'px',
-    top: Math.max(8, Math.min(bounds.bottom + 6, window.innerHeight - 100)) + 'px',
+    top: Math.max(8, Math.min(bounds.bottom + 6, window.innerHeight - 140)) + 'px',
   };
 }
 
@@ -44,8 +61,9 @@ function closeMenuOnBlur(event) {
   if (!event.currentTarget.contains(event.relatedTarget)) event.currentTarget.removeAttribute('open');
 }
 
-function editTitle() {
-  titleDraft.value = conversations.value.find(item => item.id === conversationId.value)?.title || '';
+function editTitle(item) {
+  editingConversationId.value = item.id;
+  titleDraft.value = item.title;
   editingTitle.value = true;
 }
 
@@ -54,7 +72,7 @@ async function saveTitle() {
   savingTitle.value = true;
   error.value = '';
   try {
-    const updated = await conversationApi.rename(conversationId.value, titleDraft.value.trim());
+    const updated = await conversationApi.rename(editingConversationId.value, titleDraft.value.trim());
     conversations.value = conversations.value.map(item => item.id === updated.id ? updated : item);
     editingTitle.value = false;
   } catch (exception) { error.value = exception.message; }
@@ -96,7 +114,7 @@ async function execute() {
         Array.from(goal.value.trim().replace(/\s+/g, ' ')).slice(0, 24).join(''));
       conversations.value = conversations.value.map(item => item.id === renamed.id ? renamed : item);
     }
-    result.value = await api.run({ goal: goal.value, conversationId: conversationId.value });
+    result.value = await api.run({ goal: goal.value, conversationId: conversationId.value, useKnowledge: useKnowledge.value, useNetwork: useNetwork.value });
     await loadHistory();
     goal.value = '';
     editingTitle.value = false;
@@ -125,6 +143,8 @@ async function loadConversations() {
 }
 
 async function switchConversation() {
+  useKnowledge.value = false;
+  useNetwork.value = false;
   result.value = null;
   editingTitle.value = false;
   conversationLoading.value = true;
@@ -134,6 +154,8 @@ async function switchConversation() {
 }
 
 async function newConversation() {
+  useKnowledge.value = false;
+  useNetwork.value = false;
   selectionRevision++;
   conversationId.value = '';
   conversationHistory.value = [];
@@ -150,23 +172,31 @@ async function selectConversation(id) {
   await switchConversation();
 }
 
-async function clearConversation(remove = false) {
-  if (!conversationId.value || !window.confirm(remove ? '删除此会话及全部历史？' : '清空此会话的历史与记忆？')) return;
+async function clearConversation(item, remove = false) {
+  if (running.value || conversationLoading.value || savingTitle.value) return;
+  if (!window.confirm(remove ? `删除“${item.title}”及全部历史？` : `清空“${item.title}”的历史与记忆？`)) return;
+  const targetId = item.id;
   conversationLoading.value = true;
   error.value = '';
   try {
     if (remove) {
-      await conversationApi.delete(conversationId.value);
-      conversations.value = conversations.value.filter(item => item.id !== conversationId.value);
-      conversationId.value = '';
-    } else { await conversationApi.clear(conversationId.value); }
-    conversationHistory.value = [];
-    nextHistoryId.value = null;
-    result.value = null;
+      await conversationApi.delete(targetId);
+      conversations.value = conversations.value.filter(conversation => conversation.id !== targetId);
+    } else {
+      await conversationApi.clear(targetId);
+    }
+    if (editingConversationId.value === targetId) editingTitle.value = false;
+    if (conversationId.value === targetId) {
+      if (remove) await newConversation();
+      else {
+        conversationHistory.value = [];
+        nextHistoryId.value = null;
+        result.value = null;
+      }
+    }
   } catch (exception) { error.value = exception.message; }
   finally { conversationLoading.value = false; }
 }
-
 async function loadOlderHistory() {
   conversationLoading.value = true;
   try { await loadHistory(true); }
@@ -175,7 +205,8 @@ async function loadOlderHistory() {
 }
 
 defineExpose({ newConversation, busy: computed(() => running.value || conversationLoading.value || savingTitle.value) });
-onMounted(() => { loadConfig(); loadConversations(); });
+onMounted(() => { loadConfig(); loadConversations(); resizeComposer(); window.addEventListener('resize', resizeComposer); });
+onUnmounted(() => window.removeEventListener('resize', resizeComposer));
 </script>
 
 <template>
@@ -184,17 +215,33 @@ onMounted(() => { loadConfig(); loadConversations(); });
   <div v-if="config && !config.configured" class="react-config-notice" role="status">模型尚未配置，请配置支持工具调用的模型后刷新。<button class="text-button" @click="loadConfig">刷新配置</button></div>
   <div class="chat-layout">
     <Teleport defer to="#conversation-sidebar"><aside class="session-panel">
-      <div class="recent-conversations"><h2>最近会话</h2><p v-if="!conversations.length" class="hint">发送消息后，会话会出现在这里。</p><div class="recent-list"><div v-for="item in conversations" :key="item.id" :class="['recent-row', { selected: conversationId === item.id }]"><button :class="['recent-item', { selected: conversationId === item.id }]" :title="item.title" :aria-pressed="conversationId === item.id" :disabled="running || conversationLoading || savingTitle" @click="selectConversation(item.id)">{{ item.title }}</button><details v-if="conversationId === item.id" class="conversation-menu" @toggle="positionConversationMenu" @keydown.esc="$event.currentTarget.removeAttribute('open')" @focusout="closeMenuOnBlur"><summary aria-label="会话操作" :aria-disabled="running || conversationLoading || savingTitle" @click="(running || conversationLoading || savingTitle) && $event.preventDefault()">⋯</summary><div class="conversation-menu-items" :style="menuPosition"><button type="button" :disabled="running || conversationLoading || savingTitle" @click="$event.currentTarget.closest('details').removeAttribute('open'); editTitle()">修改标题</button><button type="button" class="delete-action" :disabled="running || conversationLoading || savingTitle" @click="$event.currentTarget.closest('details').removeAttribute('open'); clearConversation(true)">删除会话</button></div></details></div></div></div>
+      <div class="recent-conversations">
+        <h2>最近会话</h2>
+        <p v-if="!conversations.length" class="hint">发送消息后，会话会出现在这里。</p>
+        <div class="recent-list">
+          <div v-for="item in conversations" :key="item.id" :class="['recent-row', { selected: conversationId === item.id }]">
+            <button :class="['recent-item', { selected: conversationId === item.id }]" :title="item.title" :aria-pressed="conversationId === item.id" :disabled="running || conversationLoading || savingTitle" @click="selectConversation(item.id)">{{ item.title }}</button>
+            <details class="conversation-menu" @toggle="positionConversationMenu" @keydown.esc="$event.currentTarget.removeAttribute('open')" @focusout="closeMenuOnBlur">
+              <summary :aria-label="item.title + '的会话操作'" :aria-disabled="running || conversationLoading || savingTitle" @click="(running || conversationLoading || savingTitle) && $event.preventDefault()">⋯</summary>
+              <div class="conversation-menu-items" :style="menuPosition">
+                <button type="button" :disabled="running || conversationLoading || savingTitle" @click="$event.currentTarget.closest('details').removeAttribute('open'); editTitle(item)">修改标题</button>
+                <button type="button" :disabled="running || conversationLoading || savingTitle" @click="$event.currentTarget.closest('details').removeAttribute('open'); clearConversation(item)">清空会话</button>
+                <button type="button" class="delete-action" :disabled="running || conversationLoading || savingTitle" @click="$event.currentTarget.closest('details').removeAttribute('open'); clearConversation(item, true)">删除会话</button>
+              </div>
+            </details>
+          </div>
+        </div>
+      </div>
       <select v-model="conversationId" aria-label="当前会话" :disabled="running || conversationLoading" @change="switchConversation"><option value="">新会话（发送时创建）</option><option v-for="item in conversations" :key="item.id" :value="item.id">{{ item.title }}</option></select>
 
       <form v-if="editingTitle" class="title-editor" @submit.prevent="saveTitle"><label>会话标题<input v-model="titleDraft" aria-label="会话标题" maxlength="80" required :disabled="savingTitle"></label><div class="session-actions"><button class="text-button" :disabled="savingTitle || !titleDraft.trim()">保存标题</button><button type="button" class="text-button" :disabled="savingTitle" @click="editingTitle = false">取消</button></div></form>
-      <div class="session-actions"><button class="text-button" :disabled="running || conversationLoading || !conversationId" @click="clearConversation()">清空会话</button></div>
+
     </aside></Teleport>
     <section class="chat-panel">
       <div class="chat-header"><strong>{{ conversations.find(item => item.id === conversationId)?.title || '新的对话' }}</strong><div class="workbench-actions"><label class="mode-selector">处理方式<select aria-label="执行模式" v-model="mode" :disabled="running || loading" @change="result = null; loadConfig()"><option value="REACT">直接处理（ReAct）</option><option value="PLAN_EXECUTE">先做计划（Plan-and-Execute）</option><option value="MULTI_AGENT">团队协作（Multi-Agent）</option></select></label></div></div>
       <div ref="thread" class="chat-thread" aria-label="对话消息" :aria-busy="running || conversationLoading">
         <p v-if="conversationLoading" class="muted" role="status">正在加载会话…</p>
-        <div v-else-if="!conversationHistory.length && !running" class="welcome"><span class="welcome-icon">✦</span><h2>今天想完成什么？</h2><p class="muted">直接输入问题，或从下面的示例开始。</p><div class="react-examples"><button class="secondary" @click="goal = '先计算128加256，再将结果乘以3，请使用工具并告诉我结果。'">多步计算</button><button class="secondary" @click="goal = '查询上海和UTC的当前时间，说明时区差异。'">当前时间</button></div></div>
+        <div v-else-if="!conversationHistory.length && !running" class="welcome"><span class="welcome-icon">✦</span><h2>今天想完成什么？</h2><p class="muted">直接输入问题，或从下面的示例开始。</p><div class="react-examples"><button class="secondary" @click="goal = '先计算128加256，再将结果乘以3，请使用工具并告诉我结果。'">多步计算</button><button class="secondary" @click="goal = '查询上海和UTC的当前时间，说明时区差异。'">当前时间</button><button class="secondary" @click="goal = '请检索我的知识库，总结主要内容，并标注引用来源。'">知识库问答</button></div></div>
         <div v-if="conversationHistory.length" class="conversation-history"><h2 class="history-label">会话历史</h2><button v-if="nextHistoryId" class="text-button" :disabled="running || conversationLoading" @click="loadOlderHistory">加载更早消息</button>
           <article v-for="turn in conversationHistory" :key="turn.id" class="conversation-turn">
             <div class="message user-message"><small>你</small><p>{{ turn.goal }}</p></div>
@@ -220,8 +267,22 @@ onMounted(() => { loadConfig(); loadConversations(); });
       </div></details></div>
       </div>
       <form class="composer" @submit.prevent="execute">
-        <textarea v-model="goal" required maxlength="2000" rows="1" :disabled="running" aria-label="任务目标" placeholder="输入你的问题或任务，也可以接着上一次回答追问…" @keydown="handleComposerKeydown"></textarea>
+        <textarea ref="composerInput" v-model="goal" required maxlength="2000" rows="1" :disabled="running" aria-label="任务目标" placeholder="输入你的问题或任务，也可以接着上一次回答追问…" @keydown="handleComposerKeydown"></textarea>
+        <div class="composer-tools">
+        <label :class="['knowledge-toggle', { selected: useKnowledge }]" title="勾选后允许当前任务按需检索已上传文档">
+          <input v-model="useKnowledge" type="checkbox" :disabled="running" />
+          <svg class="knowledge-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 5.5C9 3.8 5.7 3.8 2.5 5v14c3.2-1.2 6.5-1.2 9.5.5 3-1.7 6.3-1.7 9.5-.5V5c-3.2-1.2-6.5-1.2-9.5.5Z"/><path d="M12 5.5v14"/></svg>
+          <span>知识库</span>
+          <svg class="knowledge-check" :class="{ visible: useKnowledge }" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3.5 8 3 3 6-6"/></svg>
+        </label>
+        <label :class="['knowledge-toggle', { selected: useNetwork }]" title="开启后允许当前任务按需搜索和读取公开网页">
+          <input v-model="useNetwork" type="checkbox" :disabled="running" />
+          <svg class="knowledge-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c5 5 5 13 0 18-5-5-5-13 0-18Z"/></svg>
+          <span>联网</span>
+          <svg class="knowledge-check" :class="{ visible: useNetwork }" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3.5 8 3 3 6-6"/></svg>
+        </label>
         <button class="primary send-button" type="submit" :disabled="running || loading || conversationLoading || !config?.configured || !goal.trim()"><span aria-hidden="true">➤</span>{{ running ? '执行中…' : '发送' }}</button>
+        </div>
       </form>
     </section>
   </div></div>
@@ -306,8 +367,19 @@ dl { display:grid; grid-template-columns:1fr 1fr; gap:16px 10px; font-size:13px;
   .chat-header .mode-selector select { min-width:0; max-width:240px; }
 }
 
+.knowledge-toggle { position:absolute; left:16px; bottom:12px; display:flex; flex-direction:row; align-items:center; gap:6px; margin:0; padding:4px 8px; border:1px solid #e3e7ef; border-radius:6px; color:#4c5870; font-size:12px; font-weight:500; line-height:20px; cursor:pointer; background:#fff; transition:background .15s,border-color .15s; }
+.knowledge-toggle input { position:absolute; width:1px; height:1px; padding:0; margin:0; opacity:0; clip-path:inset(50%); }
+.knowledge-book { width:16px; height:16px; flex-shrink:0; color:#66738d; }
+.knowledge-check { width:12px; height:12px; color:#3567f6; opacity:0; }
+.knowledge-check.visible { opacity:1; }
+.knowledge-toggle:hover { background:#f8faff; border-color:#ccd6e7; }
+.knowledge-toggle.selected { background:#f4f7ff; border-color:#cbd8f4; }
+.knowledge-toggle.selected .knowledge-book { color:#3567f6; }
+.knowledge-toggle:has(input:focus-visible) { outline:2px solid #b1c5ff; outline-offset:2px; }
+.knowledge-toggle:has(input:disabled) { cursor:not-allowed; opacity:.6; }
 .composer { position:relative; padding:12px 16px; border-radius:14px; }
 .composer textarea { display:block; height:72px; min-height:72px; padding:4px 0 40px; font-size:14px; line-height:1.7; }
+.composer textarea:focus, .composer textarea:focus-visible { outline:none; box-shadow:none; }
 .send-button { position:absolute; right:12px; bottom:12px; display:flex; align-items:center; gap:7px; padding:8px 14px; font-size:13px; line-height:18px; border-radius:7px; }
 .send-button span { font-size:14px; }
 @media(max-width:600px) { .composer { padding:10px 12px; } .composer textarea { height:72px; min-height:72px; } .send-button { right:10px; bottom:10px; } }
@@ -328,4 +400,14 @@ dl { display:grid; grid-template-columns:1fr 1fr; gap:16px 10px; font-size:13px;
 .conversation-menu-items .delete-action { color:#b42e35; }
 .conversation-menu-items { position:fixed; z-index:100; width:140px; margin:0; box-shadow:0 6px 24px #19253d20; }
 .recent-row { flex-wrap:nowrap; }
+.composer textarea { height:80px; min-height:80px; max-height:320px; padding:4px 0; overflow-y:hidden; }
+.composer-tools { display:flex; align-items:center; gap:8px; margin-top:6px; padding-top:8px; border-top:1px solid #f0f2f6; }
+.composer-tools .knowledge-toggle { position:relative; left:auto; bottom:auto; flex-shrink:0; }
+.composer-tools .send-button { position:static; margin-left:auto; flex-shrink:0; }
+.conversation-menu summary { flex-shrink:0; opacity:0; pointer-events:none; transition:opacity .15s; }
+.recent-row.selected .conversation-menu summary,
+.recent-row:hover .conversation-menu summary,
+.recent-row:focus-within .conversation-menu summary,
+.conversation-menu[open] summary { opacity:1; pointer-events:auto; }
+@media (hover:none) { .conversation-menu summary { opacity:1; pointer-events:auto; } }
 </style>

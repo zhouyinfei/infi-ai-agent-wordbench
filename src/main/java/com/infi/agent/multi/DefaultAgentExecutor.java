@@ -40,7 +40,7 @@ public class DefaultAgentExecutor {
         List<ChatMessage> messages = new ArrayList<>();
         List<AgentEvidence> evidence = new ArrayList<>();
         Invocation invocation = new Invocation(task, definition, context, messages, evidence);
-        messages.add(SystemMessage.from(definition.systemPrompt()));
+        messages.add(SystemMessage.from(definition.systemPrompt() + "\n" + context.knowledgeScope().selectionInstruction()));
         messages.addAll(task.conversationHistory());
         messages.add(UserMessage.from("任务数据：" + objectMapper.valueToTree(task)));
         try {
@@ -72,7 +72,7 @@ public class DefaultAgentExecutor {
         ChatRequest.Builder builder = ChatRequest.builder().messages(List.copyOf(invocation.messages()))
                 .maxOutputTokens(MAX_OUTPUT_TOKENS);
         if (invocation.definition().withTools()) {
-            builder.toolSpecifications(toolRegistry.specifications().stream()
+            builder.toolSpecifications(toolRegistry.specifications(invocation.context().knowledgeScope()).stream()
                     .filter(tool -> invocation.definition().role().allowsTool(tool.name())).toList());
         }
         ChatResponse response;
@@ -114,13 +114,13 @@ public class DefaultAgentExecutor {
             invocation.context().beginToolCall(call);
             long started = System.nanoTime();
             ReactToolRegistry.ToolObservation observation = invocation.definition().role().allowsTool(call.name())
-                    ? toolRegistry.execute(call)
+                    ? toolRegistry.execute(call, invocation.context().knowledgeScope())
                     : new ReactToolRegistry.ToolObservation(false, null, "工具不在当前Agent的授权范围内");
             invocation.evidence().add(new AgentEvidence(call.name(), observation.arguments(),
                     observation.result(), observation.success()));
             invocation.context().recordStep(new ReactStepVO(0, invocation.task().taskNumber(), "TOOL",
                     observation.success() ? "SUCCESS" : "ERROR",
-                    observation.success() ? "工具执行完成" : "工具调用失败", call.name(),
+                    observation.summary(), call.name(),
                     observation.arguments(), observation.result(), elapsed(started),
                     invocation.definition().role().displayName()));
             invocation.messages().add(ToolExecutionResultMessage.builder().id(call.id()).toolName(call.name())

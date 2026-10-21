@@ -15,6 +15,7 @@ export function clearToken() {
 export async function request(path, options = {}) {
   const token = getToken();
   const headers = { 'Content-Type': 'application/json', ...options.headers };
+  if (options.body instanceof FormData) delete headers['Content-Type'];
   if (token) headers.Authorization = 'Bearer ' + token;
   const response = await fetch('/api' + path, { ...options, headers });
   let body;
@@ -72,4 +73,34 @@ export const conversationApi = {
   history: (id, beforeId) => request('/conversations/' + id + '/messages' + (beforeId ? '?beforeId=' + beforeId : '')),
   clear: (id) => request('/conversations/' + id + '/messages', { method: 'DELETE' }),
   delete: (id) => request('/conversations/' + id, { method: 'DELETE' }),
+};
+
+export const knowledgeApi = {
+  list: () => request('/knowledge/documents'),
+  upload: (file) => {
+    const body = new FormData();
+    body.append('file', file);
+    return request('/knowledge/documents', { method: 'POST', body });
+  },
+  delete: (id) => request('/knowledge/documents/' + encodeURIComponent(id), { method: 'DELETE' }),
+  search: (query, limit = 5) => request('/knowledge/search', { method: 'POST', body: JSON.stringify({ query, limit }) }),
+  download: async (document) => {
+    const response = await fetch('/api/knowledge/documents/' + encodeURIComponent(document.id) + '/content', {
+      headers: { Authorization: 'Bearer ' + getToken() },
+    });
+    if (!response.ok) {
+      if (response.status === 401) {
+        clearToken();
+        window.dispatchEvent(new Event('auth-expired'));
+      }
+      const body = await response.json().catch(() => ({}));
+      throw new Error(body.message || '下载失败');
+    }
+    const url = URL.createObjectURL(await response.blob());
+    const link = window.document.createElement('a');
+    link.href = url;
+    link.download = document.filename;
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  },
 };

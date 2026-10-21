@@ -28,6 +28,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @WebMvcTest(MultiAgentController.class)
 @Import(SecurityConfig.class)
 class MultiAgentControllerTest {
+    @MockitoBean
+    private com.infi.agent.mapper.KnowledgeDocumentMapper knowledgeDocuments;
     @Autowired
     private MockMvc mvc;
     @MockitoBean

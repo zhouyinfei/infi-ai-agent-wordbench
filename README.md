@@ -1,5 +1,9 @@
 # Infi AI Agent
 
+## RAG 知识库
+
+已接入 MySQL 文档元信息及状态管理、MinIO 原文存储、Elasticsearch 向量检索和知识库管理页面。先执行 `sql/003_knowledge.sql`。支持文档上传、失败原因展示、检索测试、来源引用及原文下载，三种 Agent 模式均可检索，暂不实现审批。配置与使用见 [RAG 使用说明](docs/RAG使用说明.md)。
+
 前后端分离的 AI Agent 平台，当前已实现用户系统、ReAct、Plan-and-Execute 与同步 Multi-Agent 协作。
 
 ## 界面设计预览

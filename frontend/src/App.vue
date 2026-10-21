@@ -5,6 +5,7 @@ import ProfilePanel from './components/ProfilePanel.vue';
 import UserManagement from './components/UserManagement.vue';
 import ReactWorkbench from './components/ReactWorkbench.vue';
 import ModelToolsPanel from './components/ModelToolsPanel.vue';
+import KnowledgePanel from './components/KnowledgePanel.vue';
 import { authApi, clearToken, getToken, saveToken, userApi } from './api/client';
 
 const user = ref(null);
@@ -63,7 +64,7 @@ onUnmounted(() => window.removeEventListener('auth-expired', expired));
       <span class="nav-label">工作空间</span>
       <button :class="['nav-item', { active: activePage === 'react' }]" @click="activePage = 'react'"><span>◈</span> 会话工作台</button>
       <button disabled class="nav-item"><span>▤</span> 任务中心 <small>即将开放</small></button>
-      <button disabled class="nav-item"><span>▧</span> 知识库 <small>即将开放</small></button>
+      <button :class="['nav-item', { active: activePage === 'knowledge' }]" @click="activePage = 'knowledge'"><span>▧</span> 知识库</button>
       <button :class="['nav-item', { active: activePage === 'models' }]" @click="activePage = 'models'"><span aria-hidden="true">◇</span> 模型与工具</button>
       <span class="nav-label section-gap">账号与管理</span>
       <button :class="['nav-item', { active: activePage === 'profile' }]" @click="activePage = 'profile'"><span>◎</span> 个人中心</button>
@@ -72,6 +73,6 @@ onUnmounted(() => window.removeEventListener('auth-expired', expired));
       <div id="conversation-sidebar"></div>
       <div class="sidebar-footer"><span class="status-dot"></span> {{ user.role === 'ADMIN' ? '管理员工作空间' : '个人工作空间' }}</div>
     </aside>
-    <main class="workspace"><p v-if="banner" class="error" role="alert">{{ banner }}</p><ReactWorkbench v-if="activePage === 'react'" ref="workbench" /><ModelToolsPanel v-else-if="activePage === 'models'" /><ProfilePanel v-else-if="activePage === 'profile'" :key="user.id" :user="user" @updated="user = $event" @password-changed="resetAuth('密码已更新，请使用新密码登录。')" /><UserManagement v-else-if="user.role === 'ADMIN'" /></main>
+    <main class="workspace"><p v-if="banner" class="error" role="alert">{{ banner }}</p><ReactWorkbench v-if="activePage === 'react'" ref="workbench" /><KnowledgePanel v-else-if="activePage === 'knowledge'" /><ModelToolsPanel v-else-if="activePage === 'models'" /><ProfilePanel v-else-if="activePage === 'profile'" :key="user.id" :user="user" @updated="user = $event" @password-changed="resetAuth('密码已更新，请使用新密码登录。')" /><UserManagement v-else-if="user.role === 'ADMIN'" /></main>
   </div>
 </template>

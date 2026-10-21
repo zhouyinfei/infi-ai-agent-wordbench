@@ -29,6 +29,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @WebMvcTest(ReactController.class)
 @Import(SecurityConfig.class)
 class ReactControllerTest {
+    @MockitoBean
+    private com.infi.agent.mapper.KnowledgeDocumentMapper knowledgeDocuments;
     @Autowired
     private MockMvc mvc;
     @MockitoBean

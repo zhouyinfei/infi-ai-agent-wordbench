@@ -35,7 +35,7 @@ public class PlanExecuteController {
                                       @Valid @RequestBody PlanExecuteRunDTO request) {
         if (request.conversationId() != null) {
             return ApiResponse.success(conversationService.execute(principal.id(), request.conversationId(),
-                    ConversationMode.PLAN_EXECUTE, request.goal()));
+                    ConversationMode.PLAN_EXECUTE, request.goal(), request.useKnowledge(), request.useNetwork()));
         }
         return ApiResponse.success(planExecuteService.execute(principal.id(), request));
     }

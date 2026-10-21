@@ -68,7 +68,7 @@ public class MultiAgentServiceImpl implements MultiAgentService {
     @Override
     public ReactRunVO execute(Long userId, MultiAgentRunDTO request, List<ChatMessage> history) {
         validateConfiguration();
-        AgentExecutionContext context = new AgentExecutionContext(properties);
+        AgentExecutionContext context = new AgentExecutionContext(properties, toolRegistry.newKnowledgeScope(request.useKnowledge(), request.useNetwork()));
         if (context.maxAssignments() < 1) {
             return finish(userId, context, "LIMIT_REACHED", null, "模型预算不足以完成协作");
         }
@@ -86,6 +86,12 @@ public class MultiAgentServiceImpl implements MultiAgentService {
         }
         List<AgentResult> results = new ArrayList<>();
         for (AgentAssignment assignment : coordination.assignments()) {
+            if (assignment.agent() == AgentRole.NETWORK && !context.knowledgeScope().networkEnabled()) {
+                return finish(userId, context, "FAILED", null, "用户未开启联网，本次任务禁止分配联网任务");
+            }
+            if (assignment.agent() == AgentRole.KNOWLEDGE && !context.knowledgeScope().enabled()) {
+                return finish(userId, context, "FAILED", null, "用户未勾选知识库，本次任务禁止分配知识库检索任务");
+            }
             AgentTask task = new AgentTask(results.size() + 1, request.goal(), assignment.goal(), results, history);
             AgentResult result = delegate(assignment.agent(), task, context);
             if (!result.successful()) {

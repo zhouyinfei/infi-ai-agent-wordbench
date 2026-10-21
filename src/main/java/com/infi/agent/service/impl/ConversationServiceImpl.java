@@ -91,14 +91,27 @@ public class ConversationServiceImpl implements ConversationService {
      */
     @Override
     public ReactRunVO execute(Long userId, String id, ConversationMode mode, String goal) {
+        return execute(userId, id, mode, goal, false);
+    }
+
+    /** 用户明确选择的知识库权限仅用于本次任务，不从历史消息继承。 */
+    @Override
+    public ReactRunVO execute(Long userId, String id, ConversationMode mode, String goal, boolean useKnowledge) {
+        return execute(userId, id, mode, goal, useKnowledge, false);
+    }
+
+    /** 当前轮次分别授权知识库和联网，历史消息不能自动开启工具。 */
+    @Override
+    public ReactRunVO execute(Long userId, String id, ConversationMode mode, String goal,
+                              boolean useKnowledge, boolean useNetwork) {
         ConversationMemoryId memoryId = claim(userId, id);
         try {
             ChatMemory memory = window(memoryId);
             List<ChatMessage> history = memory.messages();
             ReactRunVO result = switch (mode) {
-                case REACT -> reactService.execute(userId, new ReactRunDTO(goal), history);
-                case PLAN_EXECUTE -> planService.execute(userId, new PlanExecuteRunDTO(goal), history);
-                case MULTI_AGENT -> multiService.execute(userId, new MultiAgentRunDTO(goal), history);
+                case REACT -> reactService.execute(userId, new ReactRunDTO(goal, null, useKnowledge, useNetwork), history);
+                case PLAN_EXECUTE -> planService.execute(userId, new PlanExecuteRunDTO(goal, null, useKnowledge, useNetwork), history);
+                case MULTI_AGENT -> multiService.execute(userId, new MultiAgentRunDTO(goal, null, useKnowledge, useNetwork), history);
             };
             persistence.complete(memoryId, mode, goal, result, memory);
             return result;

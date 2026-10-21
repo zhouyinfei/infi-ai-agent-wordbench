@@ -51,4 +51,9 @@ public interface ConversationService {
      * @return 包含记忆的执行结果
      */
     ReactRunVO execute(Long userId, String id, ConversationMode mode, String goal);
+    /** 当前轮次显式授权知识库检索；未授权时模型和工具执行均禁止检索。 */
+    ReactRunVO execute(Long userId, String id, ConversationMode mode, String goal, boolean useKnowledge);
+    /** 分别透传本轮知识库和联网授权；缺省均关闭。 */
+    ReactRunVO execute(Long userId, String id, ConversationMode mode, String goal,
+                       boolean useKnowledge, boolean useNetwork);
 }

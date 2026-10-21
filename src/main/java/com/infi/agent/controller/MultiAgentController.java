@@ -43,7 +43,7 @@ public class MultiAgentController {
                                       @Valid @RequestBody MultiAgentRunDTO request) {
         if (request.conversationId() != null) {
             return ApiResponse.success(conversationService.execute(principal.id(), request.conversationId(),
-                    ConversationMode.MULTI_AGENT, request.goal()));
+                    ConversationMode.MULTI_AGENT, request.goal(), request.useKnowledge(), request.useNetwork()));
         }
         return ApiResponse.success(multiAgentService.execute(principal.id(), request));
     }

@@ -4,6 +4,10 @@ server:
     include-message: never
     include-stacktrace: never
 spring:
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 11MB
   application:
     name: infi-ai-agent
   profiles:
@@ -28,6 +32,34 @@ mybatis:
   configuration:
     map-underscore-to-camel-case: true
 app:
+  rag:
+    enabled: ${RAG_ENABLED:false}
+    minio-endpoint: ${MINIO_ENDPOINT:http://localhost:9000}
+    minio-access-key: ${MINIO_ACCESS_KEY:minioadmin}
+    minio-secret-key: ${MINIO_SECRET_KEY:minioadmin}
+    bucket: ${RAG_BUCKET:agent-wordbench-knowledge}
+    elasticsearch-url: ${ELASTICSEARCH_URL:https://localhost:9200}
+    elasticsearch-api-key: ${ELASTICSEARCH_API_KEY:}
+    elasticsearch-username: ${ELASTICSEARCH_USERNAME:}
+    elasticsearch-password: ${ELASTICSEARCH_PASSWORD:}
+    elasticsearch-ca-certificate: ${ELASTICSEARCH_CA_CERTIFICATE:}
+    index: ${RAG_INDEX:agent-knowledge-v1}
+    embedding-url: ${EMBEDDING_URL:https://api.openai.com/v1}
+    embedding-api-key: ${EMBEDDING_API_KEY:}
+    embedding-model: ${EMBEDDING_MODEL:text-embedding-3-small}
+    dimensions: ${EMBEDDING_DIMENSIONS:1536}
+    chunk-size: 800
+    chunk-overlap: 120
+    max-characters: 200000
+    max-searches-per-run: ${RAG_MAX_SEARCHES_PER_RUN:3}
+    retrieval:
+      min-score: ${RAG_MIN_SCORE:0.4}
+      hybrid-enabled: ${RAG_HYBRID_ENABLED:true}
+      candidate-size: ${RAG_CANDIDATE_SIZE:30}
+      rrf-k: ${RAG_RRF_K:60}
+      vector-weight: ${RAG_VECTOR_WEIGHT:0.7}
+      keyword-weight: ${RAG_KEYWORD_WEIGHT:0.3}
+    timeout: 60s
   mcp:
     enabled: true
     timeout: 30s

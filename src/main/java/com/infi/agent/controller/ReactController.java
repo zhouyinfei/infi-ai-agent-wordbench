@@ -47,7 +47,7 @@ public class ReactController {
                                      @Valid @RequestBody ReactRunDTO request) {
         if (request.conversationId() != null) {
             return ApiResponse.success(conversationService.execute(principal.id(), request.conversationId(),
-                    ConversationMode.REACT, request.goal()));
+                    ConversationMode.REACT, request.goal(), request.useKnowledge(), request.useNetwork()));
         }
         return ApiResponse.success(reactService.execute(principal.id(), request));
     }

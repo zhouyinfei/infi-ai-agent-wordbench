@@ -9,13 +9,23 @@ public record ReactRunDTO(
         @NotBlank(message = "任务目标不能为空")
         @Size(max = 2000, message = "任务目标不能超过2000字") String goal,
         @Pattern(regexp = "[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}", message = "会话编号不合法")
-        String conversationId) {
+        String conversationId, boolean useKnowledge, boolean useNetwork) {
+    /** 未显式开启联网时默认禁止联网工具。 */
+    public ReactRunDTO(String goal, String conversationId, boolean useKnowledge) {
+        this(goal, conversationId, useKnowledge, false);
+    }
+
+    /** 兼容旧请求，默认不允许知识库检索。 */
+    public ReactRunDTO(String goal, String conversationId) {
+        this(goal, conversationId, false);
+    }
+
     /**
      * 兼容不携带会话记忆的独立执行请求。
      *
      * @param goal 本次目标
      */
     public ReactRunDTO(String goal) {
-        this(goal, null);
+        this(goal, null, false);
     }
 }

@@ -5,6 +5,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.infi.agent.mcp.McpToolCatalog;
+import com.infi.agent.common.BusinessException;
+import com.infi.agent.config.RagProperties;
+import com.infi.agent.security.UserPrincipal;
+import org.springframework.security.core.context.SecurityContextHolder;
 import com.infi.agent.vo.ReactToolVO;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -21,6 +25,7 @@ public class ReactToolRegistry {
     private static final int MAX_ARGUMENT_LENGTH = 400_000;
     private final Map<String, ReactTool> tools = new LinkedHashMap<>();
     private final ObjectMapper objectMapper;
+    private int maxKnowledgeSearches = KnowledgeSearchScope.DEFAULT_MAX_SEARCHES;
 
     /**
      * 合并内置工具与已授权的 MCP 工具，沿用统一白名单和参数校验。
@@ -29,9 +34,38 @@ public class ReactToolRegistry {
      * @param objectMapper 参数解析器
      * @param catalog MCP 工具目录
      */
-    @Autowired
     public ReactToolRegistry(List<ReactTool> toolList, ObjectMapper objectMapper, McpToolCatalog catalog) {
         this(Stream.concat(toolList.stream(), catalog.tools().stream()).toList(), objectMapper);
+    }
+
+    /** 注入检索预算；测试和独立注册表沿用默认上限。 */
+    @Autowired
+    public ReactToolRegistry(List<ReactTool> toolList, ObjectMapper objectMapper, McpToolCatalog catalog,
+                             RagProperties properties) {
+        this(toolList, objectMapper, catalog);
+        maxKnowledgeSearches = properties.getMaxSearchesPerRun();
+        new KnowledgeSearchScope(maxKnowledgeSearches);
+    }
+
+    /** @return 每次任务必须新建的缓存及检索预算 */
+    public KnowledgeSearchScope newKnowledgeScope() {
+        return new KnowledgeSearchScope(maxKnowledgeSearches);
+    }
+
+    /** @return 绑定本次用户授权的独立检索上下文 */
+    public KnowledgeSearchScope newKnowledgeScope(boolean enabled) {
+        return new KnowledgeSearchScope(maxKnowledgeSearches, enabled);
+    }
+
+    /** @return 绑定本次知识库和联网独立授权的任务上下文 */
+    public KnowledgeSearchScope newKnowledgeScope(boolean enabled, boolean networkEnabled) {
+        return new KnowledgeSearchScope(maxKnowledgeSearches, enabled, networkEnabled);
+    }
+
+    /** 达到检索预算或不可重试错误后，不再向模型提供检索工具。 */
+    public List<ToolSpecification> specifications(KnowledgeSearchScope scope) {
+        return specifications().stream().filter(tool -> !scope.blocksNetworkTool(tool.name()))
+                .filter(tool -> scope.available() || !KnowledgeSearchScope.TOOL_NAME.equals(tool.name())).toList();
     }
 
     /**
@@ -85,8 +119,16 @@ public class ReactToolRegistry {
      * @return 包含成功标志、解析参数及结果或错误说明的观察对象
      */
     public ToolObservation execute(ToolExecutionRequest request) {
+        return execute(request, newKnowledgeScope());
+    }
+
+    /** 使用调用方持有的任务级上下文，控制跨步骤的真实检索次数。 */
+    public ToolObservation execute(ToolExecutionRequest request, KnowledgeSearchScope scope) {
         if (!tools.containsKey(request.name())) {
             return new ToolObservation(false, null, "工具不在服务端注册白名单中");
+        }
+        if (scope.blocksNetworkTool(request.name())) {
+            return new ToolObservation(false, null, "用户未开启联网，本次任务禁止网页搜索和网页读取。", "NETWORK_BLOCKED");
         }
         JsonNode arguments = null;
         try {
@@ -98,7 +140,19 @@ public class ReactToolRegistry {
             if (arguments == null || !arguments.isObject()) {
                 throw new IllegalArgumentException("工具参数须为JSON对象");
             }
-            return new ToolObservation(true, arguments, tools.get(request.name()).execute(arguments));
+            if (KnowledgeSearchScope.TOOL_NAME.equals(request.name())) {
+                ToolArguments.fields(arguments, "query");
+                String query = ToolArguments.text(arguments, "query");
+                if (query.isBlank() || query.length() > 2000) {
+                    throw new IllegalArgumentException("检索问题须为 1–2000 字符");
+                }
+                var authentication = SecurityContextHolder.getContext().getAuthentication();
+                String owner = authentication != null && authentication.getPrincipal() instanceof UserPrincipal user
+                        ? user.id().toString() : "anonymous";
+                JsonNode parsed = arguments;
+                return scope.execute(owner, query, arguments, () -> invoke(request.name(), parsed));
+            }
+            return invoke(request.name(), arguments);
         } catch (JsonProcessingException exception) {
             return new ToolObservation(false, null, "工具参数不是合法JSON");
         } catch (IllegalArgumentException exception) {
@@ -108,6 +162,36 @@ public class ReactToolRegistry {
         }
     }
 
-    public record ToolObservation(boolean success, JsonNode arguments, String result) {
+    private ToolObservation invoke(String name, JsonNode arguments) {
+        try {
+            return new ToolObservation(true, arguments, tools.get(name).execute(arguments));
+        } catch (BusinessException exception) {
+            if (!KnowledgeSearchScope.TOOL_NAME.equals(name)) {
+                return new ToolObservation(false, arguments, "工具执行异常");
+            }
+            boolean terminal = "RAG_NON_RETRYABLE".equals(exception.getCode()) || "RAG_DISABLED".equals(exception.getCode());
+            return new ToolObservation(false, arguments, exception.getMessage(), terminal ? "NON_RETRYABLE" : "EXECUTED");
+        } catch (IllegalArgumentException exception) {
+            return new ToolObservation(false, arguments, exception.getMessage());
+        } catch (RuntimeException exception) {
+            return new ToolObservation(false, arguments, "工具执行异常");
+        }
+    }
+
+    public record ToolObservation(boolean success, JsonNode arguments, String result, String execution) {
+        public ToolObservation(boolean success, JsonNode arguments, String result) {
+            this(success, arguments, result, "EXECUTED");
+        }
+
+        /** @return 区分模型提出调用、实际检索、缓存复用和已阻止的重试 */
+        public String summary() {
+            return switch (execution) {
+                case "CACHED" -> "复用本次任务知识库检索结果";
+                case "BLOCKED" -> "知识库检索已停止，未再次请求服务";
+                case "NETWORK_BLOCKED" -> "联网未开启，已拦截联网工具调用";
+                case "NON_RETRYABLE" -> "知识库检索失败，本次任务停止重试";
+                default -> success ? "工具执行完成" : "工具调用失败";
+            };
+        }
     }
 }

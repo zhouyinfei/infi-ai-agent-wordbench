@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "https://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.infi.agent.mapper.KnowledgeDocumentMapper">
+  <sql id="columns">id, user_id, filename, file_size, chunk_count, status, error_message,
+    storage_bucket, object_key, vector_index, embedding_model, embedding_dimensions, gmt_create, gmt_modified</sql>
+  <select id="list" resultType="com.infi.agent.entity.KnowledgeDocumentDO">
+    SELECT <include refid="columns"/> FROM ai_knowledge_document WHERE user_id = #{userId} AND status != 'DELETED'
+    ORDER BY gmt_create DESC, id DESC
+  </select>
+  <select id="count" resultType="int">
+    SELECT COUNT(*) FROM ai_knowledge_document WHERE user_id = #{userId} AND status != 'DELETED'
+  </select>
+  <select id="selectOwned" resultType="com.infi.agent.entity.KnowledgeDocumentDO">
+    SELECT <include refid="columns"/> FROM ai_knowledge_document WHERE id = #{id} AND user_id = #{userId} AND status != 'DELETED'
+  </select>
+  <insert id="insert">
+    INSERT INTO ai_knowledge_document (<include refid="columns"/>) VALUES
+      (#{id}, #{userId}, #{filename}, #{fileSize}, #{chunkCount}, #{status}, #{errorMessage},
+       #{storageBucket}, #{objectKey}, #{vectorIndex}, #{embeddingModel}, #{embeddingDimensions}, #{gmtCreate}, #{gmtModified})
+  </insert>
+  <update id="complete">
+    UPDATE ai_knowledge_document SET status = #{status}, error_message = #{error}, gmt_modified = #{now}
+    WHERE id = #{id} AND user_id = #{userId} AND status = 'INDEXING'
+  </update>
+  <update id="beginDelete">
+    UPDATE ai_knowledge_document SET status = 'DELETING', error_message = NULL, gmt_modified = #{now}
+    WHERE id = #{id} AND user_id = #{userId} AND status != 'DELETED'
+      AND (status != 'INDEXING' OR gmt_modified &lt;= #{staleBefore})
+  </update>
+  <update id="deleteFailed">
+    UPDATE ai_knowledge_document SET error_message = #{error}, gmt_modified = #{now}
+    WHERE id = #{id} AND user_id = #{userId} AND status = 'DELETING'
+  </update>
+  <update id="delete">
+    UPDATE ai_knowledge_document SET status = 'DELETED', error_message = NULL, gmt_modified = #{now}
+    WHERE id = #{id} AND user_id = #{userId} AND status = 'DELETING'
+  </update>
+</mapper>
