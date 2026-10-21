@@ -32,9 +32,12 @@ class ParallelToolExecutionTest {
         var latch = new CountDownLatch(2);
         var authentication = new UsernamePasswordAuthenticationToken("alice", null);
         SecurityContextHolder.getContext().setAuthentication(authentication);
+        var previousLogs = org.slf4j.MDC.getCopyOfContextMap();
+        org.slf4j.MDC.put("runId", "parallel-test");
         try {
             var registry = new ReactToolRegistry(List.of(tool("calculator", arguments -> {
                 assertSame(authentication, SecurityContextHolder.getContext().getAuthentication());
+                assertEquals("parallel-test", org.slf4j.MDC.get("runId"));
                 latch.countDown();
                 try { assertTrue(latch.await(2, TimeUnit.SECONDS)); }
                 catch (InterruptedException e) { throw new RuntimeException(e); }
@@ -45,10 +48,12 @@ class ParallelToolExecutionTest {
                     registry.newKnowledgeScope(), Duration.ofSeconds(3));
             assertEquals(List.of("first", "second"), results.stream().map(r -> r.observation().result()).toList());
             assertNull(pool.submit(() -> SecurityContextHolder.getContext().getAuthentication()).get());
+            assertNull(pool.submit(() -> org.slf4j.MDC.get("runId")).get());
         } catch (Exception exception) {
             throw new RuntimeException(exception);
         } finally {
             SecurityContextHolder.clearContext();
+            if (previousLogs == null) org.slf4j.MDC.clear(); else org.slf4j.MDC.setContextMap(previousLogs);
             pool.shutdownNow();
         }
     }

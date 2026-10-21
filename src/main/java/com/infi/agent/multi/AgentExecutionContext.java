@@ -17,7 +17,7 @@ import java.util.UUID;
 /** 单次同步协作的共享预算和轨迹，不保存角色或任何Agent的模型对话。 */
 public class AgentExecutionContext {
     private final KnowledgeSearchScope knowledgeScope;
-    private final String runId = UUID.randomUUID().toString();
+    private final String runId = com.infi.agent.common.ExecutionLogs.runId();
     private final long started = System.nanoTime();
     private final Duration timeout;
     private final int maxModelCalls;

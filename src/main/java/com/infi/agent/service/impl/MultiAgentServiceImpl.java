@@ -67,6 +67,11 @@ public class MultiAgentServiceImpl implements MultiAgentService {
      */
     @Override
     public ReactRunVO execute(Long userId, MultiAgentRunDTO request, List<ChatMessage> history) {
+        return com.infi.agent.common.ExecutionLogs.run(log, userId, "MultiAgent",
+                () -> executeInternal(userId, request, history));
+    }
+
+    private ReactRunVO executeInternal(Long userId, MultiAgentRunDTO request, List<ChatMessage> history) {
         validateConfiguration();
         AgentExecutionContext context = new AgentExecutionContext(properties, toolRegistry.newKnowledgeScope(request.useKnowledge(), request.useNetwork()));
         if (context.maxAssignments() < 1) {
@@ -121,6 +126,7 @@ public class MultiAgentServiceImpl implements MultiAgentService {
      * @return 身份与任务匹配的交付或明确失败状态
      */
     private AgentResult delegate(AgentRole role, AgentTask task, AgentExecutionContext context) {
+        log.info("Agent delegated, runId={}, agent={}, taskNumber={}", org.slf4j.MDC.get("runId"), role, task.taskNumber());
         AgentResult result = agents.agent(role).execute(task, context);
         if (result == null || result.agent() != role || result.taskNumber() != task.taskNumber()
                 || !task.goal().equals(result.goal())) {
@@ -165,6 +171,10 @@ public class MultiAgentServiceImpl implements MultiAgentService {
      */
     private ReactRunVO finish(Long userId, AgentExecutionContext context, String status, String answer, String reason) {
         ReactRunVO result = context.finish(status, answer, reason);
+        if (!"SUCCEEDED".equals(status)) {
+            log.warn("Task stopped, runId={}, status={}, reason={}",
+                    org.slf4j.MDC.get("runId"), status, reason);
+        }
         log.info("Multi-Agent completed, userId={}, runId={}, status={}, modelCalls={}, toolCalls={}",
                 userId, result.runId(), result.status(), result.modelCalls(), result.toolCalls());
         return result;

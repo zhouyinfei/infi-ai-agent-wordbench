@@ -1,6 +1,7 @@
 package com.infi.agent.multi;
 
 /** 固定配置的独立Agent实例，通用执行流程与专业输出规则可分别扩展。 */
+@lombok.extern.slf4j.Slf4j
 public class ConfiguredAgent implements Agent {
     private final AgentDefinition definition;
     private final DefaultAgentExecutor executor;
@@ -44,6 +45,8 @@ public class ConfiguredAgent implements Agent {
             context.remaining();
             return processed;
         } catch (AgentExecutionException exception) {
+            log.warn("Agent output rejected, runId={}, agent={}, taskNumber={}, status={}, reason={}",
+                    org.slf4j.MDC.get("runId"), role(), task.taskNumber(), exception.status(), exception.getMessage());
             return AgentResult.of(task, role(), exception.status(), exception.getMessage(), result.evidence());
         }
     }

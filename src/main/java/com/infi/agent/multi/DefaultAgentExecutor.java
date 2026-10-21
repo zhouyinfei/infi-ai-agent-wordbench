@@ -22,6 +22,7 @@ import org.springframework.stereotype.Component;
 /** 无状态的通用执行器；每次调用创建独立消息和证据列表，不保存当前角色。 */
 @Component
 @RequiredArgsConstructor
+@lombok.extern.slf4j.Slf4j
 public class DefaultAgentExecutor {
     private static final int MAX_OUTPUT_TOKENS = 1024;
     private final ReactModelGateway modelGateway;
@@ -56,6 +57,8 @@ public class DefaultAgentExecutor {
                 executeTools(answer.toolExecutionRequests(), invocation);
             }
         } catch (AgentExecutionException exception) {
+            log.warn("Agent stopped, runId={}, agent={}, taskNumber={}, status={}, reason={}",
+                    org.slf4j.MDC.get("runId"), definition.role(), task.taskNumber(), exception.status(), exception.getMessage());
             return AgentResult.of(task, definition.role(), exception.status(), exception.getMessage(), evidence);
         }
     }
@@ -76,16 +79,27 @@ public class DefaultAgentExecutor {
                     .filter(tool -> invocation.definition().role().allowsTool(tool.name())).toList());
         }
         ChatResponse response;
+        log.info("Agent model started, runId={}, agent={}, taskNumber={}, remainingMs={}, maxOutputTokens={}",
+                org.slf4j.MDC.get("runId"), invocation.definition().role(), invocation.task().taskNumber(),
+                remaining.toMillis(), MAX_OUTPUT_TOKENS);
         try {
             response = modelGateway.chat(builder.build(), remaining);
             invocation.context().reportUsage(response == null ? null : response.tokenUsage());
         } catch (RuntimeException exception) {
+            log.error("Agent model failed, runId={}, agent={}, taskNumber={}, durationMs={}",
+                    org.slf4j.MDC.get("runId"), invocation.definition().role(), invocation.task().taskNumber(),
+                    elapsed(started), exception);
             trace(invocation, invocation.definition().traceType(), "ERROR", "模型调用失败", elapsed(started));
             invocation.context().remaining();
             throw new AgentExecutionException("FAILED", "模型调用失败，请检查模型配置和服务状态");
         }
         invocation.context().remaining();
         AiMessage answer = response == null ? null : response.aiMessage();
+        log.info("Agent model completed, runId={}, agent={}, taskNumber={}, durationMs={}, finishReason={}, tokenUsage={}, emptyMessage={}, textLength={}, toolRequests={}",
+                org.slf4j.MDC.get("runId"), invocation.definition().role(), invocation.task().taskNumber(), elapsed(started),
+                response == null ? null : response.finishReason(), response == null ? null : response.tokenUsage(),
+                answer == null, answer == null || answer.text() == null ? 0 : answer.text().length(),
+                answer != null && answer.hasToolExecutionRequests() ? answer.toolExecutionRequests().size() : 0);
         if (answer == null || response.finishReason() == FinishReason.LENGTH) {
             throw new AgentExecutionException("FAILED", "模型返回为空或输出被截断");
         }

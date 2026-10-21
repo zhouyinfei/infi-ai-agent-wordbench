@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 /** LangChain4j 原生工具调用；禁用自动重试及请求响应日志。 */
 @Component
 @RequiredArgsConstructor
+@lombok.extern.slf4j.Slf4j
 public class OpenAiReactModelGateway implements ReactModelGateway {
     private final AiModelProperties properties;
 
@@ -41,7 +42,10 @@ public class OpenAiReactModelGateway implements ReactModelGateway {
             throw new IllegalStateException("模型超时配置不合法");
         }
         Duration timeout = configuredTimeout.compareTo(remainingTime) < 0 ? configuredTimeout : remainingTime;
-        return OpenAiChatModel.builder()
+        log.info("Model request, runId={}, model={}, timeoutMs={}, maxOutputTokens={}, messageCount={}",
+                org.slf4j.MDC.get("runId"), properties.getModelName(), timeout.toMillis(),
+                request.maxOutputTokens(), request.messages().size());
+        var response = OpenAiChatModel.builder()
                 .baseUrl(properties.getBaseUrl())
                 .apiKey(properties.getApiKey())
                 .modelName(properties.getModelName())
@@ -51,5 +55,9 @@ public class OpenAiReactModelGateway implements ReactModelGateway {
                 .logRequests(false)
                 .logResponses(false)
                 .build().chat(request);
+        log.info("Model response, runId={}, model={}, finishReason={}, tokenUsage={}",
+                org.slf4j.MDC.get("runId"), properties.getModelName(), response == null ? null : response.finishReason(),
+                response == null ? null : response.tokenUsage());
+        return response;
     }
 }

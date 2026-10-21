@@ -21,6 +21,7 @@ import org.springframework.stereotype.Component;
 
 /** 统一白名单及参数解析；调用失败转换为可反馈给模型的观察。 */
 @Component
+@lombok.extern.slf4j.Slf4j
 public class ReactToolRegistry {
     private static final int MAX_ARGUMENT_LENGTH = 400_000;
     private final Map<String, ReactTool> tools = new LinkedHashMap<>();
@@ -38,6 +39,9 @@ public class ReactToolRegistry {
                                              java.time.Duration remaining) {
         long deadline = System.nanoTime() + remaining.toNanos();
         var authentication = SecurityContextHolder.getContext().getAuthentication();
+        var loggingContext = org.slf4j.MDC.getCopyOfContextMap();
+        log.info("Tool batch started, runId={}, callCount={}, remainingMs={}",
+                org.slf4j.MDC.get("runId"), calls.size(), remaining.toMillis());
         List<TimedObservation> results = new java.util.ArrayList<>();
         List<java.util.concurrent.Future<TimedObservation>> pending = new java.util.ArrayList<>();
         try {
@@ -47,11 +51,15 @@ public class ReactToolRegistry {
                     while (end < calls.size() && parallelSafe(calls.get(end).name())) end++;
                 }
                 pending.clear();
+                log.info("Tool group scheduled, runId={}, callCount={}, parallel={}",
+                        org.slf4j.MDC.get("runId"), end - i, end - i > 1);
                 for (int j = i; j < end; j++) {
                     if (System.nanoTime() >= deadline) throw new java.util.concurrent.TimeoutException();
                     ToolExecutionRequest call = calls.get(j);
                     var task = new java.util.concurrent.FutureTask<TimedObservation>(() -> {
                         var previous = SecurityContextHolder.getContext();
+                        var previousLogs = org.slf4j.MDC.getCopyOfContextMap();
+                        if (loggingContext == null) org.slf4j.MDC.clear(); else org.slf4j.MDC.setContextMap(loggingContext);
                         var context = SecurityContextHolder.createEmptyContext();
                         context.setAuthentication(authentication);
                         SecurityContextHolder.setContext(context);
@@ -61,6 +69,7 @@ public class ReactToolRegistry {
                                     java.time.Duration.ofNanos(System.nanoTime() - started).toMillis());
                         } finally {
                             SecurityContextHolder.setContext(previous);
+                            if (previousLogs == null) org.slf4j.MDC.clear(); else org.slf4j.MDC.setContextMap(previousLogs);
                         }
                     });
                     pending.add(task);
@@ -74,11 +83,15 @@ public class ReactToolRegistry {
             }
             return List.copyOf(results);
         } catch (InterruptedException exception) {
+            log.warn("Tool batch interrupted, runId={}, callCount={}", org.slf4j.MDC.get("runId"), calls.size(), exception);
             Thread.currentThread().interrupt();
             throw new BatchExecutionException("FAILED", "工具执行已中断");
         } catch (java.util.concurrent.TimeoutException exception) {
+            log.warn("Tool batch timed out, runId={}, callCount={}, timeoutMs={}",
+                    org.slf4j.MDC.get("runId"), calls.size(), remaining.toMillis());
             throw new BatchExecutionException("TIMEOUT", "任务超过执行时限");
         } catch (java.util.concurrent.ExecutionException | java.util.concurrent.RejectedExecutionException exception) {
+            log.error("Tool batch failed, runId={}, callCount={}", org.slf4j.MDC.get("runId"), calls.size(), exception);
             throw new BatchExecutionException("FAILED", "工具执行失败或执行队列已满");
         } finally {
             pending.forEach(future -> { if (!future.isDone()) future.cancel(true); });
@@ -199,6 +212,21 @@ public class ReactToolRegistry {
 
     /** 使用调用方持有的任务级上下文，控制跨步骤的真实检索次数。 */
     public ToolObservation execute(ToolExecutionRequest request, KnowledgeSearchScope scope) {
+        long started = System.nanoTime();
+        log.info("Tool started, runId={}, callId={}, tool={}", org.slf4j.MDC.get("runId"), request.id(), request.name());
+        ToolObservation observation = executeInternal(request, scope);
+        long durationMs = java.time.Duration.ofNanos(System.nanoTime() - started).toMillis();
+        if (observation.success()) {
+            log.info("Tool completed, runId={}, callId={}, tool={}, execution={}, durationMs={}",
+                    org.slf4j.MDC.get("runId"), request.id(), request.name(), observation.execution(), durationMs);
+        } else {
+            log.warn("Tool failed, runId={}, callId={}, tool={}, execution={}, durationMs={}",
+                    org.slf4j.MDC.get("runId"), request.id(), request.name(), observation.execution(), durationMs);
+        }
+        return observation;
+    }
+
+    private ToolObservation executeInternal(ToolExecutionRequest request, KnowledgeSearchScope scope) {
         if (!tools.containsKey(request.name())) {
             return new ToolObservation(false, null, "工具不在服务端注册白名单中");
         }
@@ -229,10 +257,14 @@ public class ReactToolRegistry {
             }
             return invoke(request.name(), arguments);
         } catch (JsonProcessingException exception) {
+            log.warn("Tool arguments rejected, runId={}, callId={}, tool={}, reason=INVALID_JSON",
+                    org.slf4j.MDC.get("runId"), request.id(), request.name());
             return new ToolObservation(false, null, "工具参数不是合法JSON");
         } catch (IllegalArgumentException exception) {
             return new ToolObservation(false, arguments, exception.getMessage());
         } catch (RuntimeException exception) {
+            log.error("Tool dispatch exception, runId={}, callId={}, tool={}",
+                    org.slf4j.MDC.get("runId"), request.id(), request.name(), exception);
             return new ToolObservation(false, arguments, "工具执行异常");
         }
     }
@@ -241,6 +273,8 @@ public class ReactToolRegistry {
         try {
             return new ToolObservation(true, arguments, tools.get(name).execute(arguments));
         } catch (BusinessException exception) {
+            log.warn("Tool business exception, runId={}, tool={}, code={}", org.slf4j.MDC.get("runId"), name,
+                    exception.getCode(), exception);
             if (!KnowledgeSearchScope.TOOL_NAME.equals(name)) {
                 return new ToolObservation(false, arguments, "工具执行异常");
             }
@@ -249,6 +283,7 @@ public class ReactToolRegistry {
         } catch (IllegalArgumentException exception) {
             return new ToolObservation(false, arguments, exception.getMessage());
         } catch (RuntimeException exception) {
+            log.error("Tool execution exception, runId={}, tool={}", org.slf4j.MDC.get("runId"), name, exception);
             return new ToolObservation(false, arguments, "工具执行异常");
         }
     }

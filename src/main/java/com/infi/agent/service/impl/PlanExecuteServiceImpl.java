@@ -29,7 +29,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -97,6 +96,11 @@ public class PlanExecuteServiceImpl implements PlanExecuteService {
      */
     @Override
     public ReactRunVO execute(Long userId, PlanExecuteRunDTO request, List<ChatMessage> history) {
+        return com.infi.agent.common.ExecutionLogs.run(log, userId, "PlanExecute",
+                () -> executeInternal(userId, request, history));
+    }
+
+    private ReactRunVO executeInternal(Long userId, PlanExecuteRunDTO request, List<ChatMessage> history) {
         if (!modelGateway.isConfigured()) {
             throw new BusinessException(HttpStatus.SERVICE_UNAVAILABLE, "MODEL_NOT_CONFIGURED",
                     "请先配置并启用支持工具调用的模型");
@@ -245,12 +249,17 @@ public class PlanExecuteServiceImpl implements PlanExecuteService {
             response = modelGateway.chat(builder.build(), remaining);
             state.tokenUsage.add(response == null ? null : response.tokenUsage());
         } catch (RuntimeException exception) {
+            log.error("Model call failed, runId={}, stage={}, step={}, durationMs={}",
+                    state.runId, type, number, elapsed(started), exception);
             addStep(state, number, type, "ERROR", "模型调用失败", null, null, null, elapsed(started));
             remaining(state);
             throw new ExecutionStopped("FAILED", "模型调用失败，请检查模型配置和服务状态");
         }
         remaining(state);
         AiMessage answer = response == null ? null : response.aiMessage();
+        log.info("Model completed, runId={}, stage={}, step={}, modelCall={}, durationMs={}, finishReason={}, tokenUsage={}, maxOutputTokens={}",
+                state.runId, type, number, state.modelCalls, elapsed(started), response == null ? null : response.finishReason(),
+                response == null ? null : response.tokenUsage(), MAX_OUTPUT_TOKENS);
         if (answer == null || response.finishReason() == FinishReason.LENGTH) {
             throw new ExecutionStopped("FAILED", "模型返回为空或输出被截断");
         }
@@ -363,6 +372,10 @@ public class PlanExecuteServiceImpl implements PlanExecuteService {
      * @return 单次执行结果
      */
     private ReactRunVO finish(Long userId, RunState state, String status, String answer, String reason) {
+        if (!"SUCCEEDED".equals(status)) {
+            log.warn("Task stopped, runId={}, status={}, reason={}",
+                    org.slf4j.MDC.get("runId"), status, reason);
+        }
         log.info("Plan-and-Execute completed, userId={}, runId={}, status={}, modelCalls={}, toolCalls={}",
                 userId, state.runId, status, state.modelCalls, state.toolCalls);
         return new ReactRunVO(state.runId, status, answer, reason, state.modelCalls, state.toolCalls,
@@ -381,7 +394,7 @@ public class PlanExecuteServiceImpl implements PlanExecuteService {
 
     /** 每个请求独享的计划执行状态，禁止在单例服务中保存会话数据。 */
     private static class RunState {
-        private final String runId = UUID.randomUUID().toString();
+        private final String runId = com.infi.agent.common.ExecutionLogs.runId();
         private final long started = System.nanoTime();
         private final Duration timeout;
         private final List<ReactStepVO> steps = new ArrayList<>();

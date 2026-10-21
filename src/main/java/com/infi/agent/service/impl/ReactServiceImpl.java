@@ -27,7 +27,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -89,6 +88,11 @@ public class ReactServiceImpl implements ReactService {
      */
     @Override
     public ReactRunVO execute(Long userId, ReactRunDTO request, List<ChatMessage> history) {
+        return com.infi.agent.common.ExecutionLogs.run(log, userId, "React",
+                () -> executeInternal(userId, request, history));
+    }
+
+    private ReactRunVO executeInternal(Long userId, ReactRunDTO request, List<ChatMessage> history) {
         if (!modelGateway.isConfigured()) {
             throw new BusinessException(HttpStatus.SERVICE_UNAVAILABLE, "MODEL_NOT_CONFIGURED",
                     "请先在 application-local.yml 中启用并配置支持工具调用的模型");
@@ -118,6 +122,8 @@ public class ReactServiceImpl implements ReactService {
                         .maxOutputTokens(MAX_OUTPUT_TOKENS).build(), remaining);
                 state.tokenUsage.add(response == null ? null : response.tokenUsage());
             } catch (RuntimeException exception) {
+                log.error("Model call failed, runId={}, iteration={}, durationMs={}",
+                        state.runId, iteration, elapsed(modelStarted), exception);
                 state.steps.add(new ReactStepVO(state.steps.size() + 1, iteration, "MODEL", "ERROR",
                         "模型调用失败", null, null, null, elapsed(modelStarted)));
                 String status = elapsed(state.started) >= taskTimeout.toMillis() ? "TIMEOUT" : "FAILED";
@@ -127,6 +133,9 @@ public class ReactServiceImpl implements ReactService {
                 return finish(userId, state, "TIMEOUT", null, "任务超过执行时限");
             }
             AiMessage aiMessage = response == null ? null : response.aiMessage();
+            log.info("Model completed, runId={}, modelCall={}, durationMs={}, finishReason={}, tokenUsage={}, maxOutputTokens={}",
+                    state.runId, state.modelCalls, elapsed(modelStarted), response == null ? null : response.finishReason(),
+                    response == null ? null : response.tokenUsage(), MAX_OUTPUT_TOKENS);
             if (aiMessage == null || response.finishReason() == FinishReason.LENGTH) {
                 return finish(userId, state, "FAILED", null, "模型返回为空或输出被截断");
             }
@@ -193,6 +202,10 @@ public class ReactServiceImpl implements ReactService {
      * @return 任务执行结果及轨迹
      */
     private ReactRunVO finish(Long userId, RunState state, String status, String answer, String reason) {
+        if (!"SUCCEEDED".equals(status)) {
+            log.warn("Task stopped, runId={}, status={}, reason={}",
+                    org.slf4j.MDC.get("runId"), status, reason);
+        }
         log.info("ReAct completed, userId={}, runId={}, status={}, modelCalls={}, toolCalls={}",
                 userId, state.runId, status, state.modelCalls, state.toolCalls);
         return new ReactRunVO(state.runId, status, answer, reason, state.modelCalls,
@@ -210,7 +223,7 @@ public class ReactServiceImpl implements ReactService {
     }
 
     private static class RunState {
-        private final String runId = UUID.randomUUID().toString();
+        private final String runId = com.infi.agent.common.ExecutionLogs.runId();
         private final long started = System.nanoTime();
         private final List<ReactStepVO> steps = new ArrayList<>();
         private final TokenUsageTracker tokenUsage = new TokenUsageTracker();
