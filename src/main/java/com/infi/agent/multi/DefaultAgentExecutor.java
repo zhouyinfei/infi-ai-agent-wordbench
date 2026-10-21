@@ -98,7 +98,7 @@ public class DefaultAgentExecutor {
     }
 
     /**
-     * 检查请求结构及批次预算后，顺序执行工具并反馈观察结果。
+     * 检查请求结构及批次预算后，并行执行独立只读工具，按请求顺序反馈观察结果。
      *
      * @param calls 本轮模型提出的工具请求
      * @param invocation 当前Agent的消息、证据及父预算
@@ -112,16 +112,28 @@ public class DefaultAgentExecutor {
         invocation.context().checkToolCapacity(calls.size());
         for (ToolExecutionRequest call : calls) {
             invocation.context().beginToolCall(call);
-            long started = System.nanoTime();
-            ReactToolRegistry.ToolObservation observation = invocation.definition().role().allowsTool(call.name())
-                    ? toolRegistry.execute(call, invocation.context().knowledgeScope())
-                    : new ReactToolRegistry.ToolObservation(false, null, "工具不在当前Agent的授权范围内");
+        }
+        // 未授权请求不进入执行池，仍保留对应的错误观察。
+        var allowed = calls.stream().filter(call -> invocation.definition().role().allowsTool(call.name())).toList();
+        List<ReactToolRegistry.TimedObservation> observations;
+        try {
+            observations = toolRegistry.executeBatch(allowed, invocation.context().knowledgeScope(),
+                    invocation.context().remaining());
+        } catch (ReactToolRegistry.BatchExecutionException exception) {
+            throw new AgentExecutionException(exception.status(), exception.getMessage());
+        }
+        int index = 0;
+        for (ToolExecutionRequest call : calls) {
+            var timed = invocation.definition().role().allowsTool(call.name()) ? observations.get(index++)
+                    : new ReactToolRegistry.TimedObservation(
+                            new ReactToolRegistry.ToolObservation(false, null, "工具不在当前Agent的授权范围内"), 0);
+            ReactToolRegistry.ToolObservation observation = timed.observation();
             invocation.evidence().add(new AgentEvidence(call.name(), observation.arguments(),
                     observation.result(), observation.success()));
             invocation.context().recordStep(new ReactStepVO(0, invocation.task().taskNumber(), "TOOL",
                     observation.success() ? "SUCCESS" : "ERROR",
                     observation.summary(), call.name(),
-                    observation.arguments(), observation.result(), elapsed(started),
+                    observation.arguments(), observation.result(), timed.durationMs(),
                     invocation.definition().role().displayName()));
             invocation.messages().add(ToolExecutionResultMessage.builder().id(call.id()).toolName(call.name())
                     .text(observation.result()).isError(!observation.success()).build());

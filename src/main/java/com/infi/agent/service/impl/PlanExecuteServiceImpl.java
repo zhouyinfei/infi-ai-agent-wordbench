@@ -263,7 +263,7 @@ public class PlanExecuteServiceImpl implements PlanExecuteService {
     }
 
     /**
-     * 校验工具请求结构，执行注册工具并反馈真实观察；同轮按顺序执行，共享工具和重复调用预算。
+     * 校验工具请求结构，执行注册工具并反馈真实观察；同轮只读调用可并行，共享工具和重复调用预算。
      *
      * @param calls 模型提出的工具调用
      * @param messages 当前步骤上下文，追加工具观察结果
@@ -287,12 +287,21 @@ public class PlanExecuteServiceImpl implements PlanExecuteService {
                     && state.repetitions.merge(signature, 1, Integer::sum) > properties.getMaxRepeatedCalls()) {
                 throw new ExecutionStopped("LIMIT_REACHED", "重复调用相同工具参数，已停止无进展循环");
             }
-            state.toolCalls++;
-            long started = System.nanoTime();
-            ReactToolRegistry.ToolObservation observation = toolRegistry.execute(call, state.knowledgeScope);
+        }
+        state.toolCalls += calls.size();
+        List<ReactToolRegistry.TimedObservation> observations;
+        try {
+            observations = toolRegistry.executeBatch(calls, state.knowledgeScope, remaining(state));
+        } catch (ReactToolRegistry.BatchExecutionException exception) {
+            throw new ExecutionStopped(exception.status(), exception.getMessage());
+        }
+        for (int index = 0; index < calls.size(); index++) {
+            ToolExecutionRequest call = calls.get(index);
+            var timed = observations.get(index);
+            ReactToolRegistry.ToolObservation observation = timed.observation();
             addStep(state, number, "TOOL", observation.success() ? "SUCCESS" : "ERROR",
                     observation.summary(),
-                    call.name(), observation.arguments(), observation.result(), elapsed(started));
+                    call.name(), observation.arguments(), observation.result(), timed.durationMs());
             messages.add(ToolExecutionResultMessage.builder().id(call.id()).toolName(call.name())
                     .text(observation.result()).isError(!observation.success()).build());
             remaining(state);

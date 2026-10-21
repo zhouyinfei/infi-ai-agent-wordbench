@@ -25,6 +25,81 @@ public class ReactToolRegistry {
     private static final int MAX_ARGUMENT_LENGTH = 400_000;
     private final Map<String, ReactTool> tools = new LinkedHashMap<>();
     private final ObjectMapper objectMapper;
+    private java.util.concurrent.Executor batchExecutor = java.util.concurrent.ForkJoinPool.commonPool();
+
+    @Autowired
+    public void setBatchExecutor(@org.springframework.beans.factory.annotation.Qualifier("toolTaskExecutor")
+                                java.util.concurrent.Executor executor) {
+        this.batchExecutor = executor;
+    }
+
+    /** 连续的只读工具可并行；文件修改和未知 MCP 工具构成顺序屏障。结果保持请求顺序。 */
+    public List<TimedObservation> executeBatch(List<ToolExecutionRequest> calls, KnowledgeSearchScope scope,
+                                             java.time.Duration remaining) {
+        long deadline = System.nanoTime() + remaining.toNanos();
+        var authentication = SecurityContextHolder.getContext().getAuthentication();
+        List<TimedObservation> results = new java.util.ArrayList<>();
+        List<java.util.concurrent.Future<TimedObservation>> pending = new java.util.ArrayList<>();
+        try {
+            for (int i = 0; i < calls.size();) {
+                int end = i + 1;
+                if (parallelSafe(calls.get(i).name())) {
+                    while (end < calls.size() && parallelSafe(calls.get(end).name())) end++;
+                }
+                pending.clear();
+                for (int j = i; j < end; j++) {
+                    if (System.nanoTime() >= deadline) throw new java.util.concurrent.TimeoutException();
+                    ToolExecutionRequest call = calls.get(j);
+                    var task = new java.util.concurrent.FutureTask<TimedObservation>(() -> {
+                        var previous = SecurityContextHolder.getContext();
+                        var context = SecurityContextHolder.createEmptyContext();
+                        context.setAuthentication(authentication);
+                        SecurityContextHolder.setContext(context);
+                        long started = System.nanoTime();
+                        try {
+                            return new TimedObservation(execute(call, scope),
+                                    java.time.Duration.ofNanos(System.nanoTime() - started).toMillis());
+                        } finally {
+                            SecurityContextHolder.setContext(previous);
+                        }
+                    });
+                    pending.add(task);
+                    batchExecutor.execute(task);
+                }
+                for (var future : pending) {
+                    results.add(future.get(Math.max(1, deadline - System.nanoTime()),
+                            java.util.concurrent.TimeUnit.NANOSECONDS));
+                }
+                i = end;
+            }
+            return List.copyOf(results);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            throw new BatchExecutionException("FAILED", "工具执行已中断");
+        } catch (java.util.concurrent.TimeoutException exception) {
+            throw new BatchExecutionException("TIMEOUT", "任务超过执行时限");
+        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.RejectedExecutionException exception) {
+            throw new BatchExecutionException("FAILED", "工具执行失败或执行队列已满");
+        } finally {
+            pending.forEach(future -> { if (!future.isDone()) future.cancel(true); });
+        }
+    }
+
+    private boolean parallelSafe(String name) {
+        return java.util.Set.of("calculator", "current_time", "web_search", "http_get", "file_read", "file_list")
+                .contains(name);
+    }
+
+    public record TimedObservation(ToolObservation observation, long durationMs) {}
+
+    public static class BatchExecutionException extends RuntimeException {
+        private final String status;
+        public BatchExecutionException(String status, String message) {
+            super(message);
+            this.status = status;
+        }
+        public String status() { return status; }
+    }
     private int maxKnowledgeSearches = KnowledgeSearchScope.DEFAULT_MAX_SEARCHES;
 
     /**

@@ -148,7 +148,7 @@ public class ReactServiceImpl implements ReactService {
                 return finish(userId, state, "FAILED", null, "模型返回的工具调用结构不合法");
             }
             messages.add(aiMessage);
-            // 同轮工具按返回顺序执行，本阶段不实现并行工具调用。
+            // 先校验整批预算，再调度工具；仅由编排线程追加轨迹和消息。
             for (ToolExecutionRequest call : calls) {
                 if (elapsed(state.started) >= taskTimeout.toMillis()) {
                     return finish(userId, state, "TIMEOUT", null, "任务超过执行时限");
@@ -158,13 +158,23 @@ public class ReactServiceImpl implements ReactService {
                         && repetitions.merge(signature, 1, Integer::sum) > properties.getMaxRepeatedCalls()) {
                     return finish(userId, state, "LIMIT_REACHED", null, "重复调用相同工具参数，已停止无进展循环");
                 }
-                long toolStarted = System.nanoTime();
-                state.toolCalls++;
-                ReactToolRegistry.ToolObservation observation = toolRegistry.execute(call, state.knowledgeScope);
+            }
+            state.toolCalls += calls.size();
+            List<ReactToolRegistry.TimedObservation> observations;
+            try {
+                observations = toolRegistry.executeBatch(calls, state.knowledgeScope,
+                        taskTimeout.minusNanos(System.nanoTime() - state.started));
+            } catch (ReactToolRegistry.BatchExecutionException exception) {
+                return finish(userId, state, exception.status(), null, exception.getMessage());
+            }
+            for (int index = 0; index < calls.size(); index++) {
+                ToolExecutionRequest call = calls.get(index);
+                var timed = observations.get(index);
+                ReactToolRegistry.ToolObservation observation = timed.observation();
                 state.steps.add(new ReactStepVO(state.steps.size() + 1, iteration, "TOOL",
                         observation.success() ? "SUCCESS" : "ERROR",
                         observation.summary(),
-                        call.name(), observation.arguments(), observation.result(), elapsed(toolStarted)));
+                        call.name(), observation.arguments(), observation.result(), timed.durationMs()));
                 messages.add(ToolExecutionResultMessage.builder().id(call.id()).toolName(call.name())
                         .text(observation.result()).isError(!observation.success()).build());
             }

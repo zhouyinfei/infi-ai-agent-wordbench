@@ -33,6 +33,8 @@ const mode = ref('REACT');
 const modeLabels = { REACT: 'ReAct', PLAN_EXECUTE: 'Plan-and-Execute', MULTI_AGENT: 'Multi-Agent' };
 const modeLabel = computed(() => modeLabels[mode.value]);
 const assignments = computed(() => result.value?.steps.find(step => step.type === 'COORDINATE' && step.summary === '协作分工')?.arguments || []);
+const toolSteps = computed(() => result.value?.steps.filter(step => step.type === 'TOOL') || []);
+const toolLabels = { knowledge_search: '知识库检索', web_search: '网页搜索', http_get: '网页读取', calculator: '计算器', current_time: '当前时间' };
 const agentLabels = { CALCULATOR: '计算 Agent', TIME: '时间 Agent', FILE: '文件 Agent', NETWORK: '联网 Agent', MCP: 'MCP Agent', KNOWLEDGE: '知识库 Agent', ANALYST: '分析 Agent' };
 const plan = computed(() => result.value?.steps.find(step => step.type === 'PLAN' && step.summary === '执行计划')?.arguments || []);
 const tokenCount = value => value == null ? '未提供' : value.toLocaleString();
@@ -249,22 +251,6 @@ onUnmounted(() => window.removeEventListener('resize', resizeComposer));
           </article>
         </div>
         <div v-if="running" class="pending-turn" role="status"><div class="message user-message"><small>你</small><p>{{ submittedGoal }}</p></div><div class="message assistant-message"><span class="status-dot"></span> 正在处理，请稍候…</div></div>
-        <div v-if="result" class="execution-footer"><h2>{{ labels[result.status] || result.status }}</h2><p v-if="result.stopReason" class="error">{{ result.stopReason }}</p><div v-if="result.answer && !conversationHistory.length" class="react-answer">{{ result.answer }}</div><p class="run-usage" data-testid="run-token-summary">本次执行：{{ tokenCount(result.tokenUsage?.totalTokens) }} Token · {{ result.toolCalls }} 次工具调用 · {{ result.durationMs }}ms<span v-if="result.tokenUsage?.reportedModelCalls && !result.tokenUsage.complete">（Token 为部分统计）</span></p><details class="execution-details"><summary>查看执行详情</summary>
-        <template v-if="result">
-          <section v-if="assignments.length" class="detail-section"><h2>协作分工</h2><ol class="plan-list collaboration-list"><li v-for="(assignment, index) in assignments" :key="index"><strong>{{ agentLabels[assignment.agent] || assignment.agent }}</strong>：{{ assignment.goal }} <span class="badge" :class="{ success: result.steps.some(step => step.type === 'AGENT' && step.iteration === index + 1) }">{{ result.steps.some(step => step.type === 'AGENT' && step.iteration === index + 1) ? '已完成' : '未完成' }}</span></li></ol></section>
-          <section v-if="plan.length" class="detail-section"><h2>执行计划</h2><ol class="plan-list"><li v-for="(item, index) in plan" :key="index">{{ item }} <span class="badge" :class="{ success: result.steps.some(step => step.type === 'STEP' && step.iteration === index + 1) }">{{ result.steps.some(step => step.type === 'STEP' && step.iteration === index + 1) ? '已完成' : '未完成' }}</span></li></ol></section>
-          
-          <section class="detail-section"><h2>执行过程</h2><p class="muted">展示工具动作和实际观察结果。</p>
-            <div v-for="step in result.steps" :key="step.sequence" class="react-step">
-              <div class="react-step-title"><span :class="['badge', step.status === 'SUCCESS' ? 'success' : 'disabled']">{{ stepLabels[step.type] || step.type }}</span><span v-if="step.agentName" class="badge agent-role">{{ step.agentName }}</span><strong>{{ step.toolName || step.summary }}</strong><small class="muted">{{ mode === 'REACT' ? '第' + step.iteration + '轮' : (step.type === 'REVIEW' ? '审校阶段' : step.type === 'FINAL' ? '汇总阶段' : (step.iteration ? '步骤' + step.iteration : '规划阶段')) }} · {{ step.durationMs }}ms</small></div>
-              <pre v-if="step.arguments">{{ JSON.stringify(step.arguments, null, 2) }}</pre>
-              <div v-if="step.observation" class="react-observation" :class="{ 'tool-error': step.status === 'ERROR' }">{{ step.observation }}</div>
-            </div>
-          </section>
-        </template>
-
-<div class="detail-section"><h2>本次执行</h2><dl><dt>状态</dt><dd>{{ labels[result.status] }}</dd><dt>模型调用</dt><dd>{{ result.modelCalls }} 次</dd><dt>工具调用</dt><dd>{{ result.toolCalls }} 次</dd><dt>总耗时</dt><dd>{{ result.durationMs }}ms</dd><dt>输入 Token</dt><dd>{{ tokenCount(result.tokenUsage?.inputTokens) }}</dd><dt>输出 Token</dt><dd>{{ tokenCount(result.tokenUsage?.outputTokens) }}</dd><dt>总 Token</dt><dd>{{ tokenCount(result.tokenUsage?.totalTokens) }}</dd></dl><p class="hint" data-testid="token-usage-status">{{ !result.modelCalls ? '未调用模型' : !result.tokenUsage?.reportedModelCalls ? '模型服务未返回 Token 用量' : result.tokenUsage.complete ? 'Token 用量统计完整' : 'Token 用量为部分统计，可能低于实际消耗' }}<template v-if="result.modelCalls && result.tokenUsage?.reportedModelCalls"> · 已报告 {{ result.tokenUsage.reportedModelCalls }}/{{ result.modelCalls }} 次调用</template></p><p class="hint">执行编号：{{ result.runId }}</p>
-      </div></details></div>
       </div>
       <form class="composer" @submit.prevent="execute">
         <textarea ref="composerInput" v-model="goal" required maxlength="2000" rows="1" :disabled="running" aria-label="任务目标" placeholder="输入你的问题或任务，也可以接着上一次回答追问…" @keydown="handleComposerKeydown"></textarea>
@@ -285,6 +271,38 @@ onUnmounted(() => window.removeEventListener('resize', resizeComposer));
         </div>
       </form>
     </section>
+    <aside class="task-panel" aria-label="任务详情" :aria-busy="running">
+      <div class="task-panel-heading"><h2>任务详情</h2><span class="badge">{{ modeLabel }}</span></div>
+      <div v-if="running" class="task-empty" role="status"><span class="status-dot"></span>正在执行任务<p class="hint">执行结束后展示协作 Agent 和实际工具调用记录。</p></div>
+      <div v-else-if="!result" class="task-empty"><p>暂无执行记录</p><p class="hint">发送任务后，在这里查看协作分工、知识库检索和网页搜索等工具调用。</p><p v-if="conversationHistory.length" class="hint">历史会话暂未提供执行详情，请发送新任务查看。</p></div>
+        <div v-if="result" class="execution-footer"><h2>{{ labels[result.status] || result.status }}</h2><p v-if="result.stopReason" class="error">{{ result.stopReason }}</p><div v-if="result.answer && !conversationHistory.length" class="react-answer">{{ result.answer }}</div><p class="run-usage" data-testid="run-token-summary">本次执行：{{ tokenCount(result.tokenUsage?.totalTokens) }} Token · {{ result.toolCalls }} 次工具调用 · {{ result.durationMs }}ms<span v-if="result.tokenUsage?.reportedModelCalls && !result.tokenUsage.complete">（Token 为部分统计）</span></p><div class="execution-details">
+        <template v-if="result">
+          <section class="detail-section"><h2>协作 Agent</h2><p v-if="!assignments.length" class="hint">本次执行未分配协作 Agent。</p><ol class="plan-list collaboration-list"><li v-for="(assignment, index) in assignments" :key="index"><strong>{{ agentLabels[assignment.agent] || assignment.agent }}</strong>：{{ assignment.goal }} <span class="badge" :class="{ success: result.steps.some(step => step.type === 'AGENT' && step.iteration === index + 1) }">{{ result.steps.some(step => step.type === 'AGENT' && step.iteration === index + 1) ? '已完成' : '未完成' }}</span></li></ol></section>
+          <section v-if="plan.length" class="detail-section"><h2>执行计划</h2><ol class="plan-list"><li v-for="(item, index) in plan" :key="index">{{ item }} <span class="badge" :class="{ success: result.steps.some(step => step.type === 'STEP' && step.iteration === index + 1) }">{{ result.steps.some(step => step.type === 'STEP' && step.iteration === index + 1) ? '已完成' : '未完成' }}</span></li></ol></section>
+
+          <section class="detail-section"><h2>工具调用 · {{ toolSteps.length }}</h2>
+            <p v-if="!toolSteps.length" class="hint">本次执行未调用工具。</p>
+            <details v-for="step in toolSteps" :key="step.sequence" class="tool-call">
+              <summary><span class="tool-name">{{ toolLabels[step.toolName] || step.toolName }}<small>{{ step.agentName || step.toolName }}</small></span><span :class="['badge', step.status === 'SUCCESS' ? 'success' : 'tool-error']">{{ step.status === 'SUCCESS' ? '完成' : '失败' }}</span></summary>
+              <p class="hint">调用 #{{ step.sequence }} · {{ step.durationMs }}ms</p>
+              <pre v-if="step.arguments">{{ JSON.stringify(step.arguments, null, 2) }}</pre>
+              <div v-if="step.observation" class="react-observation" :class="{ 'tool-error': step.status === 'ERROR' }">{{ step.observation }}</div>
+            </details>
+          </section>
+          <details class="process-details"><summary>查看完整执行过程</summary>
+          <section class="detail-section"><h2>执行过程</h2><p class="muted">展示工具动作和实际观察结果。</p>
+            <div v-for="step in result.steps" :key="step.sequence" class="react-step">
+              <div class="react-step-title"><span :class="['badge', step.status === 'SUCCESS' ? 'success' : 'disabled']">{{ stepLabels[step.type] || step.type }}</span><span v-if="step.agentName" class="badge agent-role">{{ step.agentName }}</span><strong>{{ step.toolName || step.summary }}</strong><small class="muted">{{ mode === 'REACT' ? '第' + step.iteration + '轮' : (step.type === 'REVIEW' ? '审校阶段' : step.type === 'FINAL' ? '汇总阶段' : (step.iteration ? '步骤' + step.iteration : '规划阶段')) }} · {{ step.durationMs }}ms</small></div>
+              <pre v-if="step.arguments">{{ JSON.stringify(step.arguments, null, 2) }}</pre>
+              <div v-if="step.observation" class="react-observation" :class="{ 'tool-error': step.status === 'ERROR' }">{{ step.observation }}</div>
+            </div>
+          </section>
+          </details>
+        </template>
+
+<div class="detail-section"><h2>本次执行</h2><dl><dt>状态</dt><dd>{{ labels[result.status] }}</dd><dt>模型调用</dt><dd>{{ result.modelCalls }} 次</dd><dt>工具调用</dt><dd>{{ result.toolCalls }} 次</dd><dt>总耗时</dt><dd>{{ result.durationMs }}ms</dd><dt>输入 Token</dt><dd>{{ tokenCount(result.tokenUsage?.inputTokens) }}</dd><dt>输出 Token</dt><dd>{{ tokenCount(result.tokenUsage?.outputTokens) }}</dd><dt>总 Token</dt><dd>{{ tokenCount(result.tokenUsage?.totalTokens) }}</dd></dl><p class="hint" data-testid="token-usage-status">{{ !result.modelCalls ? '未调用模型' : !result.tokenUsage?.reportedModelCalls ? '模型服务未返回 Token 用量' : result.tokenUsage.complete ? 'Token 用量统计完整' : 'Token 用量为部分统计，可能低于实际消耗' }}<template v-if="result.modelCalls && result.tokenUsage?.reportedModelCalls"> · 已报告 {{ result.tokenUsage.reportedModelCalls }}/{{ result.modelCalls }} 次调用</template></p><p class="hint">执行编号：{{ result.runId }}</p>
+      </div></div></div>
+    </aside>
   </div></div>
 </template>
 <style scoped>
@@ -410,4 +428,30 @@ dl { display:grid; grid-template-columns:1fr 1fr; gap:16px 10px; font-size:13px;
 .recent-row:focus-within .conversation-menu summary,
 .conversation-menu[open] summary { opacity:1; pointer-events:auto; }
 @media (hover:none) { .conversation-menu summary { opacity:1; pointer-events:auto; } }
+</style>
+
+<style scoped>
+.chat-layout { gap:0; }
+.task-panel { flex:0 0 330px; width:330px; min-width:0; min-height:0; overflow-y:auto; padding:24px 20px; border-left:1px solid #e8edf5; background:#fff; overscroll-behavior:contain; }
+.task-panel-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:18px; }
+.task-panel-heading h2 { font-size:18px; margin:0; }
+.task-panel-heading > .badge { font-size:10px; background:#eef3ff; color:#3567f6; }
+.task-empty { padding:18px 0; color:#66738d; font-size:13px; }
+.task-panel .execution-footer { padding:0; }
+.task-panel .execution-footer > h2 { color:#3567f6; margin:0 0 12px; }
+.task-panel .execution-details { border:0; padding:0; }
+.task-panel .detail-section { border-top:1px solid #edf0f6; padding:18px 0; }
+.task-panel .detail-section h2 { font-size:15px; margin-bottom:12px; }
+.collaboration-list { list-style:none; padding:0; margin:0; }
+.collaboration-list li { border:1px solid #e4e9f2; border-radius:9px; padding:12px; margin-top:10px; font-size:12px; line-height:1.8; }
+.tool-call { border-bottom:1px solid #edf0f6; padding:12px 0; }
+.tool-call summary { display:flex; align-items:center; gap:10px; list-style:none; color:#263853; }
+.tool-call summary::-webkit-details-marker { display:none; }
+.tool-name { flex:1; min-width:0; overflow-wrap:anywhere; font-size:13px; font-weight:600; }
+.tool-name small { display:block; color:#8590a5; font-size:11px; font-weight:400; }
+.tool-call .badge { padding:4px 7px; font-size:11px; }
+.process-details { margin:8px 0 18px; font-size:12px; }
+.task-panel pre,.task-panel .react-observation { max-height:260px; overflow:auto; font-size:12px; }
+@media(max-width:1100px) { .task-panel { flex-basis:290px; width:290px; padding:20px 16px; } .react-examples { flex-wrap:wrap; } }
+@media(max-width:800px) { .chat-layout { flex-direction:column; overflow-y:auto; } .chat-panel { flex:none; min-height:560px; } .chat-thread { min-height:260px; max-height:55vh; } .task-panel { flex:none; width:100%; overflow:visible; border-left:0; border-top:1px solid #e8edf5; } }
 </style>
