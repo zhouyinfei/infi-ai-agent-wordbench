@@ -68,7 +68,7 @@ application.yml 保存普通配置及隐私项的环境变量占位备份。appl
 
 新增文件创建、读取、覆盖写入、删除、目录浏览与 HTTP GET 工具；三种模式均已接入。配置和使用边界见 [工具使用说明](docs/工具使用说明.md)。
 
-登录后打开“会话工作台”，可提交计算或当前时间任务并查看动作与观察轨迹。首先在 src/main/resources/application-local.yml 配置 app.ai 的 enabled、base-url、model-name、api-key；模型须支持工具调用。本轮仅接入一个 OpenAI 兼容模型，不提供默认模拟模式，未配置时明确提示。
+登录后打开“会话工作台”，可提交计算或当前时间任务并查看动作与观察轨迹。首先在 src/main/resources/application-local.yml 配置 app.ai 的 enabled、base-url、model-name、api-key；模型须支持工具调用。支持配置多个 OpenAI 兼容模型，在工作台按次切换，三种 Agent 模式均可使用。配置见 [多模型使用说明](docs/多模型使用说明.md)。未配置时明确提示。
 
 使用说明、接口、边界与自测见 [ReAct 使用说明](docs/ReAct使用说明.md)。
 

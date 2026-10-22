@@ -2,6 +2,7 @@ package com.infi.agent.controller;
 
 import com.infi.agent.common.ApiResponse;
 import com.infi.agent.dto.ReactRunDTO;
+import com.infi.agent.react.model.ModelSelection;
 import com.infi.agent.security.UserPrincipal;
 import com.infi.agent.service.ReactService;
 import com.infi.agent.service.ConversationService;
@@ -45,10 +46,12 @@ public class ReactController {
     @PostMapping("/runs")
     public ApiResponse<ReactRunVO> run(@AuthenticationPrincipal UserPrincipal principal,
                                      @Valid @RequestBody ReactRunDTO request) {
-        if (request.conversationId() != null) {
-            return ApiResponse.success(conversationService.execute(principal.id(), request.conversationId(),
-                    ConversationMode.REACT, request.goal(), request.useKnowledge(), request.useNetwork()));
+        try (var selection = ModelSelection.select(request.modelId())) {
+            if (request.conversationId() != null) {
+                return ApiResponse.success(conversationService.execute(principal.id(), request.conversationId(),
+                        ConversationMode.REACT, request.goal(), request.useKnowledge(), request.useNetwork()));
+            }
+            return ApiResponse.success(reactService.execute(principal.id(), request));
         }
-        return ApiResponse.success(reactService.execute(principal.id(), request));
     }
 }

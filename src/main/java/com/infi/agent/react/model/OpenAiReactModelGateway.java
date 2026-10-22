@@ -22,9 +22,7 @@ public class OpenAiReactModelGateway implements ReactModelGateway {
      */
     @Override
     public boolean isConfigured() {
-        return properties.isEnabled() && properties.getApiKey() != null && !properties.getApiKey().isBlank()
-                && properties.getModelName() != null && !properties.getModelName().isBlank()
-                && properties.getBaseUrl() != null && !properties.getBaseUrl().isBlank();
+        return ModelCatalog.configured(ModelCatalog.resolve(properties, ModelSelection.current()));
     }
 
     /**
@@ -37,6 +35,8 @@ public class OpenAiReactModelGateway implements ReactModelGateway {
      */
     @Override
     public ChatResponse chat(ChatRequest request, Duration remainingTime) {
+        AiModelProperties properties = ModelCatalog.resolve(this.properties, ModelSelection.current());
+        if (!ModelCatalog.configured(properties)) throw new IllegalStateException("所选模型尚未配置");
         Duration configuredTimeout = properties.getRequestTimeout();
         if (configuredTimeout == null || configuredTimeout.isNegative() || configuredTimeout.isZero()) {
             throw new IllegalStateException("模型超时配置不合法");

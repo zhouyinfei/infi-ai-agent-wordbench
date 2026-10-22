@@ -2,6 +2,7 @@ package com.infi.agent.controller;
 
 import com.infi.agent.common.ApiResponse;
 import com.infi.agent.dto.PlanExecuteRunDTO;
+import com.infi.agent.react.model.ModelSelection;
 import com.infi.agent.security.UserPrincipal;
 import com.infi.agent.service.PlanExecuteService;
 import com.infi.agent.service.ConversationService;
@@ -33,10 +34,12 @@ public class PlanExecuteController {
     @PostMapping("/runs")
     public ApiResponse<ReactRunVO> run(@AuthenticationPrincipal UserPrincipal principal,
                                       @Valid @RequestBody PlanExecuteRunDTO request) {
-        if (request.conversationId() != null) {
-            return ApiResponse.success(conversationService.execute(principal.id(), request.conversationId(),
-                    ConversationMode.PLAN_EXECUTE, request.goal(), request.useKnowledge(), request.useNetwork()));
+        try (var selection = ModelSelection.select(request.modelId())) {
+            if (request.conversationId() != null) {
+                return ApiResponse.success(conversationService.execute(principal.id(), request.conversationId(),
+                        ConversationMode.PLAN_EXECUTE, request.goal(), request.useKnowledge(), request.useNetwork()));
+            }
+            return ApiResponse.success(planExecuteService.execute(principal.id(), request));
         }
-        return ApiResponse.success(planExecuteService.execute(principal.id(), request));
     }
 }

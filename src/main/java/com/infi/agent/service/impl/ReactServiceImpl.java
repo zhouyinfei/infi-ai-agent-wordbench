@@ -1,5 +1,6 @@
 package com.infi.agent.service.impl;
 
+import com.infi.agent.react.model.ModelCatalog;
 import com.infi.agent.react.tool.KnowledgeSearchScope;
 
 import com.infi.agent.common.BusinessException;
@@ -61,7 +62,7 @@ public class ReactServiceImpl implements ReactService {
      */
     @Override
     public ReactConfigVO configuration() {
-        return new ReactConfigVO(modelGateway.isConfigured(), modelProperties.getModelName(),
+        return new ReactConfigVO(modelGateway.isConfigured(), ModelCatalog.resolve(modelProperties, null).getModelName(),
                 properties.getMaxIterations(), properties.getMaxToolCalls(),
                 properties.getTaskTimeout().toSeconds(), toolRegistry.descriptions());
     }

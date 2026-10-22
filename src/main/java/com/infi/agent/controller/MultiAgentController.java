@@ -2,6 +2,7 @@ package com.infi.agent.controller;
 
 import com.infi.agent.common.ApiResponse;
 import com.infi.agent.dto.MultiAgentRunDTO;
+import com.infi.agent.react.model.ModelSelection;
 import com.infi.agent.security.UserPrincipal;
 import com.infi.agent.service.MultiAgentService;
 import com.infi.agent.service.ConversationService;
@@ -41,10 +42,12 @@ public class MultiAgentController {
     @PostMapping("/runs")
     public ApiResponse<ReactRunVO> run(@AuthenticationPrincipal UserPrincipal principal,
                                       @Valid @RequestBody MultiAgentRunDTO request) {
-        if (request.conversationId() != null) {
-            return ApiResponse.success(conversationService.execute(principal.id(), request.conversationId(),
-                    ConversationMode.MULTI_AGENT, request.goal(), request.useKnowledge(), request.useNetwork()));
+        try (var selection = ModelSelection.select(request.modelId())) {
+            if (request.conversationId() != null) {
+                return ApiResponse.success(conversationService.execute(principal.id(), request.conversationId(),
+                        ConversationMode.MULTI_AGENT, request.goal(), request.useKnowledge(), request.useNetwork()));
+            }
+            return ApiResponse.success(multiAgentService.execute(principal.id(), request));
         }
-        return ApiResponse.success(multiAgentService.execute(principal.id(), request));
     }
 }

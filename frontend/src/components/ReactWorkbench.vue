@@ -9,6 +9,9 @@ const editingConversationId = ref('');
 const titleDraft = ref('');
 const savingTitle = ref(false);
 const config = ref(null);
+const models = ref([]);
+const modelId = ref('');
+function selectModel() { if (config.value) config.value.configured = !!models.value.find(model => model.id === modelId.value)?.configured; }
 const goal = ref('');
 const useKnowledge = ref(false);
 const useNetwork = ref(false);
@@ -86,6 +89,9 @@ async function loadConfig() {
   error.value = '';
   try {
     config.value = await (mode.value === 'MULTI_AGENT' ? multiAgentApi : reactApi).configuration();
+    models.value = await reactApi.models();
+    if (!models.value.some(model => model.id === modelId.value)) modelId.value = models.value.find(model => model.defaultModel)?.id || '';
+    selectModel();
   } catch (exception) { error.value = exception.message; }
   finally { loading.value = false; }
 }
@@ -116,7 +122,7 @@ async function execute() {
         Array.from(goal.value.trim().replace(/\s+/g, ' ')).slice(0, 24).join(''));
       conversations.value = conversations.value.map(item => item.id === renamed.id ? renamed : item);
     }
-    result.value = await api.run({ goal: goal.value, conversationId: conversationId.value, useKnowledge: useKnowledge.value, useNetwork: useNetwork.value });
+    result.value = await api.run({ goal: goal.value, conversationId: conversationId.value, useKnowledge: useKnowledge.value, useNetwork: useNetwork.value, modelId: modelId.value });
     await loadHistory();
     goal.value = '';
     editingTitle.value = false;
@@ -240,7 +246,7 @@ onUnmounted(() => window.removeEventListener('resize', resizeComposer));
 
     </aside></Teleport>
     <section class="chat-panel">
-      <div class="chat-header"><strong>{{ conversations.find(item => item.id === conversationId)?.title || '新的对话' }}</strong><div class="workbench-actions"><label class="mode-selector">处理方式<select aria-label="执行模式" v-model="mode" :disabled="running || loading" @change="result = null; loadConfig()"><option value="REACT">直接处理（ReAct）</option><option value="PLAN_EXECUTE">先做计划（Plan-and-Execute）</option><option value="MULTI_AGENT">团队协作（Multi-Agent）</option></select></label></div></div>
+      <div class="chat-header"><strong>{{ conversations.find(item => item.id === conversationId)?.title || '新的对话' }}</strong><div class="workbench-actions"><label class="mode-selector">模型<select v-model="modelId" aria-label="运行模型" :disabled="running || loading" @change="selectModel"><option v-for="model in models" :key="model.id" :value="model.id" :disabled="!model.configured">{{ model.modelName || model.id || '未配置' }}{{ model.defaultModel ? '（默认）' : '' }}</option></select></label><label class="mode-selector">处理方式<select aria-label="执行模式" v-model="mode" :disabled="running || loading" @change="result = null; loadConfig()"><option value="REACT">直接处理（ReAct）</option><option value="PLAN_EXECUTE">先做计划（Plan-and-Execute）</option><option value="MULTI_AGENT">团队协作（Multi-Agent）</option></select></label></div></div>
       <div ref="thread" class="chat-thread" aria-label="对话消息" :aria-busy="running || conversationLoading">
         <p v-if="conversationLoading" class="muted" role="status">正在加载会话…</p>
         <div v-else-if="!conversationHistory.length && !running" class="welcome"><span class="welcome-icon">✦</span><h2>今天想完成什么？</h2><p class="muted">直接输入问题，或从下面的示例开始。</p><div class="react-examples"><button class="secondary" @click="goal = '先计算128加256，再将结果乘以3，请使用工具并告诉我结果。'">多步计算</button><button class="secondary" @click="goal = '查询上海和UTC的当前时间，说明时区差异。'">当前时间</button><button class="secondary" @click="goal = '请检索我的知识库，总结主要内容，并标注引用来源。'">知识库问答</button></div></div>

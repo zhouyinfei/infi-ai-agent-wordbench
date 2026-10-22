@@ -50,6 +50,7 @@ export const userApi = {
 };
 
 export const reactApi = {
+  models: () => request('/react/models'),
   configuration: () => request('/react/config'),
   run: (data) => request('/react/runs', { method: 'POST', body: JSON.stringify(data) }),
 };

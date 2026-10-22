@@ -10,6 +10,7 @@ import com.infi.agent.multi.AgentRegistry;
 import com.infi.agent.multi.AgentResult;
 import com.infi.agent.multi.AgentRole;
 import com.infi.agent.multi.AgentTask;
+import com.infi.agent.react.model.ModelCatalog;
 import com.infi.agent.react.model.ReactModelGateway;
 import com.infi.agent.react.tool.ReactToolRegistry;
 import com.infi.agent.service.MultiAgentService;
@@ -40,7 +41,7 @@ public class MultiAgentServiceImpl implements MultiAgentService {
     /** @return 不含凭证的模型状态、整体预算及工具信息 */
     @Override
     public ReactConfigVO configuration() {
-        return new ReactConfigVO(modelGateway.isConfigured(), modelProperties.getModelName(),
+        return new ReactConfigVO(modelGateway.isConfigured(), ModelCatalog.resolve(modelProperties, null).getModelName(),
                 properties.getMaxIterations(), properties.getMaxToolCalls(),
                 properties.getTaskTimeout().toSeconds(), toolRegistry.descriptions());
     }

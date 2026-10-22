@@ -2,12 +2,13 @@
 import { onMounted, ref } from 'vue';
 import { reactApi } from '../api/client';
 const config = ref(null);
+const models = ref([]);
 const loading = ref(false);
 const error = ref('');
 async function load() {
   loading.value = true;
   error.value = '';
-  try { config.value = await reactApi.configuration(); }
+  try { config.value = await reactApi.configuration(); models.value = await reactApi.models(); }
   catch (exception) { error.value = exception.message; }
   finally { loading.value = false; }
 }
@@ -18,7 +19,7 @@ onMounted(load);
   <p v-if="error" class="error" role="alert">{{ error }}</p>
   <p v-if="loading" class="muted" role="status">正在加载…</p>
   <template v-else-if="config">
-    <section class="card"><h2>当前模型</h2><p>{{ config.modelName || '未配置' }} <span :class="['badge', config.configured ? 'success' : 'disabled']">{{ config.configured ? '已配置' : '尚未配置' }}</span></p><p class="hint">配置在后端配置文件中维护，修改后重启后端并刷新。</p></section>
+    <section class="card"><h2>模型目录</h2><p v-for="model in models" :key="model.id">{{ model.id || '默认' }} · {{ model.modelName || '未配置' }} · {{ model.configured ? '已配置' : '不可用' }}{{ model.defaultModel ? '（默认）' : '' }}</p><h2>默认模型</h2><p>{{ config.modelName || '未配置' }} <span :class="['badge', config.configured ? 'success' : 'disabled']">{{ config.configured ? '已配置' : '尚未配置' }}</span></p><p class="hint">连接配置在后端维护；在会话工作台选择模型，下次发送立即生效。</p></section>
     <section class="card"><h2>可用工具</h2><p class="hint">Agent 根据任务自动选择工具，无需手动勾选。</p><article v-for="tool in config.tools" :key="tool.name" class="tool"><strong>{{ tool.name }}</strong><p class="muted">{{ tool.description }}</p></article><p v-if="!config.tools?.length" class="muted">暂无可用工具。</p></section>
     <section class="card"><h2>执行限制</h2><p class="hint">以下为 ReAct 和 Plan-and-Execute 的执行预算。</p><dl><dt>最多模型调用</dt><dd>{{ config.maxIterations }} 次</dd><dt>最多工具调用</dt><dd>{{ config.maxToolCalls }} 次</dd><dt>执行时限</dt><dd>{{ config.taskTimeoutSeconds }} 秒</dd></dl></section>
   </template>

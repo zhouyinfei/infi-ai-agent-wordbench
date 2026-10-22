@@ -98,12 +98,23 @@ app:
     admin-username: ${BOOTSTRAP_ADMIN_USERNAME:}
     admin-password: ${BOOTSTRAP_ADMIN_PASSWORD:}
   ai:
-    enabled: ${AI_ENABLED:false}
-    base-url: ${AI_BASE_URL:https://api.openai.com/v1}
-    model-name: ${AI_MODEL:}
-    # 隐私配置备份占位，实际密钥填入 application-local.yml 或环境变量。
-    api-key: ${AI_API_KEY:}
-    request-timeout: 500s
+    default-model: deepseek-v4-flash-0731
+    models:
+      "[deepseek-v4.1-flash]":
+        enabled: true
+        provider: openai-compatible
+        base-url: https://ws-pl6el2kmifl7zzb2.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+        model-name: deepseek-v4.1-flash
+        api-key: ${DEEPSEEK_API_KEY}
+        request-timeout: 30s
+
+      deepseek-v4-flash-0731:
+        enabled: true
+        provider: openai-compatible
+        base-url: https://ws-pl6el2kmifl7zzb2.cn-beijing.maas.aliyuncs.com/compatible-mode/v1
+        model-name: deepseek-v4-flash-0731
+        api-key: ${DASHSCOPE_API_KEY}
+        request-timeout: 30s
   multi-agent:
     max-iterations: 12
     max-tool-calls: 10

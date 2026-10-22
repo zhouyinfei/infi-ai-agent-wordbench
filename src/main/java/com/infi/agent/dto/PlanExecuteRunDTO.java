@@ -9,7 +9,10 @@ public record PlanExecuteRunDTO(
         @NotBlank(message = "任务目标不能为空")
         @Size(max = 2000, message = "任务目标不能超过2000字") String goal,
         @Pattern(regexp = "[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}", message = "会话编号不合法")
-        String conversationId, boolean useKnowledge, boolean useNetwork) {
+        String conversationId, boolean useKnowledge, boolean useNetwork, @Size(max = 80) String modelId) {
+    public PlanExecuteRunDTO(String goal, String conversationId, boolean useKnowledge, boolean useNetwork) {
+        this(goal, conversationId, useKnowledge, useNetwork, null);
+    }
     /** 未显式开启联网时默认禁止联网工具。 */
     public PlanExecuteRunDTO(String goal, String conversationId, boolean useKnowledge) {
         this(goal, conversationId, useKnowledge, false);
