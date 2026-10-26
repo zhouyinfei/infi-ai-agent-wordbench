@@ -7,6 +7,12 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 /** 并行工具调用使用有界线程池。 */
 @Configuration
 public class ExecutionConfiguration {
+    /** @return 等待人工确认的任务使用独立有界线程池，不占用工具执行池 */
+    @Bean
+    public ThreadPoolTaskExecutor humanTaskExecutor() {
+        return pool("agent-human-", 8, 16);
+    }
+
     @Bean
     public ThreadPoolTaskExecutor toolTaskExecutor() {
         return pool("agent-tool-", 8, 64);

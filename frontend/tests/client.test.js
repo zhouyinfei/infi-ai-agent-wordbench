@@ -1,6 +1,18 @@
 import { beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { request, saveToken, getToken, conversationApi, multiAgentApi, planExecuteApi, reactApi, knowledgeApi } from '../src/api/client.js';
+import { request, saveToken, getToken, conversationApi, multiAgentApi, planExecuteApi, reactApi, knowledgeApi, agentTaskApi } from '../src/api/client.js';
+
+test('approval decision binds current task and exact approval, without replacing operation', async () => {
+  saveToken('approval-token');
+  globalThis.fetch = async (url, options) => {
+    assert.equal(url, '/api/agent-tasks/task/decision');
+    assert.equal(options.method, 'POST');
+    assert.equal(options.headers.Authorization, 'Bearer approval-token');
+    assert.deepEqual(JSON.parse(options.body), { approvalId: 'approval', approved: true });
+    return { ok: true, json: async () => ({ data: { status: 'RUNNING' } }) };
+  };
+  assert.equal((await agentTaskApi.decide('task', { approvalId: 'approval', approved: true })).status, 'RUNNING');
+});
 
 const memory = new Map();
 

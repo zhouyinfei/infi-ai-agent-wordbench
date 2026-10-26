@@ -1,16 +1,16 @@
 package com.infi.agent.service.impl;
 
-import com.infi.agent.react.tool.KnowledgeSearchScope;
-
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.infi.agent.approval.HumanApprovalContext;
 import com.infi.agent.common.BusinessException;
 import com.infi.agent.config.ReactProperties;
 import com.infi.agent.dto.PlanExecuteRunDTO;
 import com.infi.agent.react.model.ReactModelGateway;
 import com.infi.agent.react.model.TokenUsageTracker;
+import com.infi.agent.react.tool.KnowledgeSearchScope;
 import com.infi.agent.react.tool.ReactToolRegistry;
 import com.infi.agent.service.PlanExecuteService;
 import com.infi.agent.vo.ReactRunVO;
@@ -205,7 +205,7 @@ public class PlanExecuteServiceImpl implements PlanExecuteService {
      */
     private String executeStep(String goal, String step, List<String> previousResults, int number, RunState state, List<ChatMessage> history) {
         List<ChatMessage> messages = new ArrayList<>();
-        messages.add(SystemMessage.from(EXECUTOR_PROMPT));
+        messages.add(SystemMessage.from(EXECUTOR_PROMPT + "\n" + HumanApprovalContext.instruction()));
         messages.addAll(history);
         messages.add(UserMessage.from("原始目标：" + goal + "\n当前步骤：" + step
                 + "\n之前步骤的结果：" + objectMapper.valueToTree(previousResults)));
@@ -236,7 +236,7 @@ public class PlanExecuteServiceImpl implements PlanExecuteService {
             throw new ExecutionStopped("LIMIT_REACHED", "达到整次任务模型调用次数上限");
         }
         state.modelCalls++;
-        long started = System.nanoTime();
+        long started = HumanApprovalContext.nanoTime();
         List<ChatMessage> selectedMessages = new ArrayList<>(messages);
         selectedMessages.add(1, SystemMessage.from(state.knowledgeScope.selectionInstruction()));
         ChatRequest.Builder builder = ChatRequest.builder().messages(List.copyOf(selectedMessages))
@@ -335,7 +335,7 @@ public class PlanExecuteServiceImpl implements PlanExecuteService {
      * @return 剩余执行时长
      */
     private Duration remaining(RunState state) {
-        Duration remaining = state.timeout.minusNanos(System.nanoTime() - state.started);
+        Duration remaining = state.timeout.minusNanos(HumanApprovalContext.nanoTime() - state.started);
         if (remaining.isNegative() || remaining.toMillis() < 1) {
             throw new ExecutionStopped("TIMEOUT", "任务超过执行时限");
         }
@@ -379,7 +379,8 @@ public class PlanExecuteServiceImpl implements PlanExecuteService {
         log.info("Plan-and-Execute completed, userId={}, runId={}, status={}, modelCalls={}, toolCalls={}",
                 userId, state.runId, status, state.modelCalls, state.toolCalls);
         return new ReactRunVO(state.runId, status, answer, reason, state.modelCalls, state.toolCalls,
-                elapsed(state.started), List.copyOf(state.steps), state.tokenUsage.snapshot(state.modelCalls));
+                elapsed(state.started), HumanApprovalContext.withApprovalSteps(state.steps),
+                state.tokenUsage.snapshot(state.modelCalls));
     }
 
     /**
@@ -389,13 +390,13 @@ public class PlanExecuteServiceImpl implements PlanExecuteService {
      * @return 已经过的毫秒数
      */
     private static long elapsed(long started) {
-        return Duration.ofNanos(System.nanoTime() - started).toMillis();
+        return Duration.ofNanos(HumanApprovalContext.nanoTime() - started).toMillis();
     }
 
     /** 每个请求独享的计划执行状态，禁止在单例服务中保存会话数据。 */
     private static class RunState {
         private final String runId = com.infi.agent.common.ExecutionLogs.runId();
-        private final long started = System.nanoTime();
+        private final long started = HumanApprovalContext.nanoTime();
         private final Duration timeout;
         private final List<ReactStepVO> steps = new ArrayList<>();
         private final Map<String, Integer> repetitions = new HashMap<>();

@@ -1,6 +1,7 @@
 package com.infi.agent.multi;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.infi.agent.approval.HumanApprovalContext;
 import com.infi.agent.react.model.ReactModelGateway;
 import com.infi.agent.react.tool.ReactToolRegistry;
 import com.infi.agent.vo.ReactStepVO;
@@ -41,7 +42,8 @@ public class DefaultAgentExecutor {
         List<ChatMessage> messages = new ArrayList<>();
         List<AgentEvidence> evidence = new ArrayList<>();
         Invocation invocation = new Invocation(task, definition, context, messages, evidence);
-        messages.add(SystemMessage.from(definition.systemPrompt() + "\n" + context.knowledgeScope().selectionInstruction()));
+        messages.add(SystemMessage.from(definition.systemPrompt() + "\n" + HumanApprovalContext.instruction()
+                + "\n" + context.knowledgeScope().selectionInstruction()));
         messages.addAll(task.conversationHistory());
         messages.add(UserMessage.from("任务数据：" + objectMapper.valueToTree(task)));
         try {
@@ -128,7 +130,8 @@ public class DefaultAgentExecutor {
             invocation.context().beginToolCall(call);
         }
         // 未授权请求不进入执行池，仍保留对应的错误观察。
-        var allowed = calls.stream().filter(call -> invocation.definition().role().allowsTool(call.name())).toList();
+        var allowed = calls.stream().filter(call -> invocation.definition().role()
+                .allowsTool(toolRegistry.effectiveToolName(call))).toList();
         List<ReactToolRegistry.TimedObservation> observations;
         try {
             observations = toolRegistry.executeBatch(allowed, invocation.context().knowledgeScope(),
@@ -138,7 +141,8 @@ public class DefaultAgentExecutor {
         }
         int index = 0;
         for (ToolExecutionRequest call : calls) {
-            var timed = invocation.definition().role().allowsTool(call.name()) ? observations.get(index++)
+            var timed = invocation.definition().role().allowsTool(toolRegistry.effectiveToolName(call))
+                    ? observations.get(index++)
                     : new ReactToolRegistry.TimedObservation(
                             new ReactToolRegistry.ToolObservation(false, null, "工具不在当前Agent的授权范围内"), 0);
             ReactToolRegistry.ToolObservation observation = timed.observation();

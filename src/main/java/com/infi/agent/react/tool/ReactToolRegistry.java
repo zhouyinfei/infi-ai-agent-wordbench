@@ -1,14 +1,14 @@
 package com.infi.agent.react.tool;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.infi.agent.mcp.McpToolCatalog;
+import com.infi.agent.approval.HumanApprovalContext;
 import com.infi.agent.common.BusinessException;
 import com.infi.agent.config.RagProperties;
+import com.infi.agent.mcp.McpToolCatalog;
 import com.infi.agent.security.UserPrincipal;
-import org.springframework.security.core.context.SecurityContextHolder;
 import com.infi.agent.vo.ReactToolVO;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 
 /** 统一白名单及参数解析；调用失败转换为可反馈给模型的观察。 */
@@ -37,6 +38,13 @@ public class ReactToolRegistry {
     /** 连续的只读工具可并行；文件修改和未知 MCP 工具构成顺序屏障。结果保持请求顺序。 */
     public List<TimedObservation> executeBatch(List<ToolExecutionRequest> calls, KnowledgeSearchScope scope,
                                              java.time.Duration remaining) {
+        if (calls.stream().anyMatch(call -> HumanApprovalContext.TOOL_NAME.equals(call.name()))) {
+            if (calls.size() != 1) {
+                return calls.stream().map(call -> new TimedObservation(new ToolObservation(false, null,
+                        "人工确认必须单独调用，本批次未执行任何工具；请只提出一次request_approval"), 0L)).toList();
+            }
+            return executeApprovalBatch(calls, scope, remaining);
+        }
         long deadline = System.nanoTime() + remaining.toNanos();
         var authentication = SecurityContextHolder.getContext().getAuthentication();
         var loggingContext = org.slf4j.MDC.getCopyOfContextMap();
@@ -98,6 +106,80 @@ public class ReactToolRegistry {
         }
     }
 
+    /** 审批在编排线程形成顺序屏障；批准后直接执行冻结参数，不再让模型重建操作。 */
+    private List<TimedObservation> executeApprovalBatch(List<ToolExecutionRequest> calls,
+                                                       KnowledgeSearchScope scope, java.time.Duration remaining) {
+        long deadline = HumanApprovalContext.nanoTime() + remaining.toNanos();
+        List<TimedObservation> results = new java.util.ArrayList<>();
+        for (ToolExecutionRequest call : calls) {
+            long started = HumanApprovalContext.nanoTime();
+            ToolExecutionRequest target = call;
+            JsonNode approvalArguments = null;
+            if (HumanApprovalContext.TOOL_NAME.equals(call.name())) {
+                try {
+                    if (!HumanApprovalContext.active()) {
+                        throw new BatchExecutionException("FAILED", "当前入口不支持人工确认，请使用工作台任务入口");
+                    }
+                    if (call.arguments() == null || call.arguments().length() > MAX_ARGUMENT_LENGTH) {
+                        throw new IllegalArgumentException("审批参数为空或过长");
+                    }
+                    approvalArguments = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                            .readTree(call.arguments());
+                    ToolArguments.fields(approvalArguments, "reason", "toolName", "toolArguments");
+                    String reason = ToolArguments.text(approvalArguments, "reason");
+                    String name = ToolArguments.text(approvalArguments, "toolName");
+                    String arguments = ToolArguments.text(approvalArguments, "toolArguments");
+                    if (reason.isBlank() || reason.length() > 2000 || !tools.containsKey(name)
+                            || HumanApprovalContext.TOOL_NAME.equals(name)
+                            || arguments.length() > MAX_ARGUMENT_LENGTH || scope.blocksNetworkTool(name)
+                            || (KnowledgeSearchScope.TOOL_NAME.equals(name) && !scope.enabled())) {
+                        throw new IllegalArgumentException("审批原因、目标工具或权限不合法");
+                    }
+                    JsonNode parsed = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+                            .readTree(arguments);
+                    if (parsed == null || !parsed.isObject()) {
+                        throw new IllegalArgumentException("目标工具参数须为JSON对象");
+                    }
+                    target = ToolExecutionRequest.builder().id(call.id()).name(name).arguments(arguments).build();
+                    HumanApprovalContext.await(reason, target);
+                } catch (JsonProcessingException | IllegalArgumentException exception) {
+                    results.add(new TimedObservation(new ToolObservation(false, approvalArguments,
+                            "人工确认请求参数无效"), 0L));
+                    continue;
+                }
+            }
+            long left = deadline - HumanApprovalContext.nanoTime();
+            if (left <= 0) {
+                throw new BatchExecutionException("TIMEOUT", "任务超过执行时限");
+            }
+            TimedObservation timed = executeBatch(List.of(target), scope, java.time.Duration.ofNanos(left)).get(0);
+            results.add(approvalArguments == null ? timed : new TimedObservation(
+                    new ToolObservation(timed.observation().success(), approvalArguments,
+                            timed.observation().result(), "APPROVED"),
+                    java.time.Duration.ofNanos(HumanApprovalContext.nanoTime() - started).toMillis()));
+        }
+        return List.copyOf(results);
+    }
+
+    /**
+     * @param call 模型请求
+     * @return 审批包装内真实的工具名，解析失败返回空名称以拒绝权限
+     */
+    public String effectiveToolName(ToolExecutionRequest call) {
+        if (!HumanApprovalContext.TOOL_NAME.equals(call.name())) {
+            return call.name();
+        }
+        if (call.arguments() == null || call.arguments().length() > MAX_ARGUMENT_LENGTH) {
+            return "";
+        }
+        try {
+            JsonNode root = objectMapper.readTree(call.arguments());
+            return root == null ? "" : root.path("toolName").asText("");
+        } catch (JsonProcessingException | IllegalArgumentException exception) {
+            return "";
+        }
+    }
+
     private boolean parallelSafe(String name) {
         return java.util.Set.of("calculator", "current_time", "web_search", "http_get", "file_read", "file_list")
                 .contains(name);
@@ -152,8 +234,13 @@ public class ReactToolRegistry {
 
     /** 达到检索预算或不可重试错误后，不再向模型提供检索工具。 */
     public List<ToolSpecification> specifications(KnowledgeSearchScope scope) {
-        return specifications().stream().filter(tool -> !scope.blocksNetworkTool(tool.name()))
-                .filter(tool -> scope.available() || !KnowledgeSearchScope.TOOL_NAME.equals(tool.name())).toList();
+        Stream<ToolSpecification> available = specifications().stream()
+                .filter(tool -> !scope.blocksNetworkTool(tool.name()))
+                .filter(tool -> scope.available() || !KnowledgeSearchScope.TOOL_NAME.equals(tool.name()));
+        if (HumanApprovalContext.active()) {
+            available = Stream.concat(available, Stream.of(new RequestApprovalTool().specification()));
+        }
+        return available.toList();
     }
 
     /**
@@ -296,6 +383,7 @@ public class ReactToolRegistry {
         /** @return 区分模型提出调用、实际检索、缓存复用和已阻止的重试 */
         public String summary() {
             return switch (execution) {
+                case "APPROVED" -> success ? "当前用户批准后执行完成" : "当前用户批准后工具执行失败";
                 case "CACHED" -> "复用本次任务知识库检索结果";
                 case "BLOCKED" -> "知识库检索已停止，未再次请求服务";
                 case "NETWORK_BLOCKED" -> "联网未开启，已拦截联网工具调用";

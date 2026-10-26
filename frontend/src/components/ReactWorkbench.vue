@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
-import { conversationApi, multiAgentApi, planExecuteApi, reactApi } from '../api/client';
+import { agentTaskApi, conversationApi, multiAgentApi, reactApi } from '../api/client';
 
 const thread = ref(null);
 const submittedGoal = ref('');
@@ -37,16 +37,75 @@ const modeLabels = { REACT: 'ReAct', PLAN_EXECUTE: 'Plan-and-Execute', MULTI_AGE
 const modeLabel = computed(() => modeLabels[mode.value]);
 const assignments = computed(() => result.value?.steps.find(step => step.type === 'COORDINATE' && step.summary === '协作分工')?.arguments || []);
 const toolSteps = computed(() => result.value?.steps.filter(step => step.type === 'TOOL') || []);
-const toolLabels = { knowledge_search: '知识库检索', web_search: '网页搜索', http_get: '网页读取', calculator: '计算器', current_time: '当前时间' };
-const agentLabels = { CALCULATOR: '计算 Agent', TIME: '时间 Agent', FILE: '文件 Agent', NETWORK: '联网 Agent', MCP: 'MCP Agent', KNOWLEDGE: '知识库 Agent', ANALYST: '分析 Agent' };
+const toolLabels = { knowledge_search: '知识库检索', web_search: '网页搜索', http_get: '网页读取', calculator: '计算器', current_time: '当前时间', file_create: '创建文件', file_read: '读取文件', file_write: '写入文件', file_delete: '删除文件', file_list: '浏览目录', request_approval: '用户确认后执行' };
+const agentLabels = { CALCULATOR: '计算 Agent', TIME: '时间 Agent', EMAIL: '邮件 Agent', FILE: '文件 Agent', NETWORK: '联网 Agent', MCP: 'MCP Agent', KNOWLEDGE: '知识库 Agent', ANALYST: '分析 Agent' };
 const plan = computed(() => result.value?.steps.find(step => step.type === 'PLAN' && step.summary === '执行计划')?.arguments || []);
 const tokenCount = value => value == null ? '未提供' : value.toLocaleString();
-const stepLabels = { PLAN: '生成计划', MODEL: '模型判断', TOOL: '工具执行', STEP: '步骤完成', FINAL: '汇总回答', COORDINATE: '协调分工', AGENT: '专业执行', REVIEW: '独立审校' };
+const stepLabels = { PLAN: '生成计划', MODEL: '模型判断', TOOL: '工具执行', STEP: '步骤完成', FINAL: '汇总回答', COORDINATE: '协调分工', AGENT: '专业执行', REVIEW: '独立审校', APPROVAL: '用户审批' };
 const running = ref(false);
+const activeTask = ref(null);
+const deciding = ref(false);
+const approvalExpanded = ref(false);
+const approvalTarget = computed(() => {
+  try {
+    const args = JSON.parse(activeTask.value?.approval?.arguments || '{}');
+    return [args.path, args.url, args.query].find(value => typeof value === 'string' && value.trim()) || '';
+  } catch { return ''; }
+});
+let disposed = false;
+watch(() => activeTask.value?.approval?.id, async id => {
+  approvalExpanded.value = false;
+  if (!id) return;
+  await nextTick();
+  if (thread.value) thread.value.scrollTop = thread.value.scrollHeight;
+});
+
+async function followTask() {
+  while (!disposed && activeTask.value && !activeTask.value.result) {
+    await new Promise(resolve => setTimeout(resolve, 800));
+    if (disposed) return;
+    activeTask.value = await agentTaskApi.get(activeTask.value.id);
+  }
+  if (!disposed && activeTask.value?.result) {
+    result.value = activeTask.value.result;
+    await loadHistory();
+  }
+}
+
+async function decideApproval(approved) {
+  if (deciding.value || !activeTask.value?.approval) return;
+  deciding.value = true;
+  error.value = '';
+  try {
+    await agentTaskApi.decide(activeTask.value.id, { approvalId: activeTask.value.approval.id, approved });
+    activeTask.value = await agentTaskApi.get(activeTask.value.id);
+  } catch (exception) { error.value = exception.message; }
+  finally { deciding.value = false; }
+}
+
+async function resumeTask() {
+  if (running.value) return;
+  running.value = true;
+  try {
+    if (activeTask.value?.id) {
+      activeTask.value = await agentTaskApi.get(activeTask.value.id);
+    } else {
+      const tasks = await agentTaskApi.active();
+      if (!tasks.length) return;
+      activeTask.value = tasks[0];
+    }
+    conversationId.value = activeTask.value.conversationId || '';
+    submittedGoal.value = activeTask.value.goal || '';
+    if (activeTask.value.mode) mode.value = activeTask.value.mode;
+    await loadHistory();
+    await followTask();
+  } catch (exception) { error.value = exception.message; }
+  finally { running.value = false; }
+}
 const loading = ref(true);
 const error = ref('');
 const result = ref(null);
-const labels = { SUCCEEDED: '执行完成', FAILED: '执行失败', TIMEOUT: '执行超时', LIMIT_REACHED: '达到执行上限' };
+const labels = { SUCCEEDED: '执行完成', FAILED: '执行失败', TIMEOUT: '执行超时', LIMIT_REACHED: '达到执行上限', REJECTED: '已拒绝，任务停止' };
 
 const menuPosition = ref({});
 
@@ -110,7 +169,6 @@ async function execute() {
   error.value = '';
   result.value = null;
   try {
-    const api = { REACT: reactApi, PLAN_EXECUTE: planExecuteApi, MULTI_AGENT: multiAgentApi }[mode.value];
     if (!conversationId.value) {
       const conversation = await conversationApi.create(Array.from(goal.value.trim().replace(/\s+/g, ' ')).slice(0, 24).join(''));
       conversations.value.unshift(conversation);
@@ -122,8 +180,8 @@ async function execute() {
         Array.from(goal.value.trim().replace(/\s+/g, ' ')).slice(0, 24).join(''));
       conversations.value = conversations.value.map(item => item.id === renamed.id ? renamed : item);
     }
-    result.value = await api.run({ goal: goal.value, conversationId: conversationId.value, useKnowledge: useKnowledge.value, useNetwork: useNetwork.value, modelId: modelId.value });
-    await loadHistory();
+    activeTask.value = await agentTaskApi.submit({ goal: goal.value, mode: mode.value, conversationId: conversationId.value, useKnowledge: useKnowledge.value, useNetwork: useNetwork.value, modelId: modelId.value });
+    await followTask();
     goal.value = '';
     editingTitle.value = false;
   } catch (exception) { error.value = exception.message; }
@@ -180,9 +238,22 @@ async function selectConversation(id) {
   await switchConversation();
 }
 
-async function clearConversation(item, remove = false) {
+const conversationDialog = ref(null);
+const pendingConversationAction = ref(null);
+function clearConversation(item, remove = false) {
   if (running.value || conversationLoading.value || savingTitle.value) return;
-  if (!window.confirm(remove ? `删除“${item.title}”及全部历史？` : `清空“${item.title}”的历史与记忆？`)) return;
+  pendingConversationAction.value = { item, remove };
+  conversationDialog.value.showModal();
+}
+function closeConversationDialog() {
+  conversationDialog.value.close();
+  pendingConversationAction.value = null;
+}
+async function confirmConversationAction() {
+  if (!pendingConversationAction.value) return;
+  const { item, remove } = pendingConversationAction.value;
+  if (running.value || conversationLoading.value || savingTitle.value) return;
+  closeConversationDialog();
   const targetId = item.id;
   conversationLoading.value = true;
   error.value = '';
@@ -213,11 +284,23 @@ async function loadOlderHistory() {
 }
 
 defineExpose({ newConversation, busy: computed(() => running.value || conversationLoading.value || savingTitle.value) });
-onMounted(() => { loadConfig(); loadConversations(); resizeComposer(); window.addEventListener('resize', resizeComposer); });
-onUnmounted(() => window.removeEventListener('resize', resizeComposer));
+onMounted(() => { loadConfig(); loadConversations().then(resumeTask); resizeComposer(); window.addEventListener('resize', resizeComposer); });
+onUnmounted(() => { disposed = true; window.removeEventListener('resize', resizeComposer); });
 </script>
 
 <template>
+  <Teleport to="body">
+    <dialog ref="conversationDialog" class="conversation-dialog" aria-labelledby="conversation-dialog-title" aria-describedby="conversation-dialog-description" @cancel.prevent="closeConversationDialog">
+      <template v-if="pendingConversationAction">
+        <h2 id="conversation-dialog-title">{{ pendingConversationAction.remove ? '删除会话' : '清空会话' }}</h2>
+        <p id="conversation-dialog-description">确定{{ pendingConversationAction.remove ? '删除' : '清空' }}“{{ pendingConversationAction.item.title }}”的全部历史与记忆？此操作无法撤销。</p>
+        <div class="conversation-dialog-actions">
+          <button type="button" class="secondary" autofocus @click="closeConversationDialog">取消</button>
+          <button type="button" class="conversation-confirm" @click="confirmConversationAction">{{ pendingConversationAction.remove ? '确认删除' : '确认清空' }}</button>
+        </div>
+      </template>
+    </dialog>
+  </Teleport>
   <div class="workbench-root"><h1 class="sr-only">会话工作台</h1>
   <p v-if="error" class="error" role="alert">{{ error }}</p>
   <div v-if="config && !config.configured" class="react-config-notice" role="status">模型尚未配置，请配置支持工具调用的模型后刷新。<button class="text-button" @click="loadConfig">刷新配置</button></div>
@@ -256,7 +339,8 @@ onUnmounted(() => window.removeEventListener('resize', resizeComposer));
             <div class="message assistant-message"><small>Agent · {{ modeLabels[turn.mode] || turn.mode }}</small><div v-if="turn.answer" class="react-answer">{{ turn.answer }}</div><p v-else class="muted">本轮未完成，未加入模型记忆。你可以调整任务后重试。</p></div>
           </article>
         </div>
-        <div v-if="running" class="pending-turn" role="status"><div class="message user-message"><small>你</small><p>{{ submittedGoal }}</p></div><div class="message assistant-message"><span class="status-dot"></span> 正在处理，请稍候…</div></div>
+        <div v-if="running" class="pending-turn" role="status"><div class="message user-message"><small>你</small><p>{{ submittedGoal }}</p></div><div class="message assistant-message"><span class="status-dot"></span> {{ activeTask?.status === 'WAITING_APPROVAL' ? '等待你确认操作' : '正在处理，请稍候…' }}</div></div>
+        <button v-if="!running && activeTask && !activeTask.result" type="button" @click="resumeTask">重新连接任务</button>
       </div>
       <form class="composer" @submit.prevent="execute">
         <textarea ref="composerInput" v-model="goal" required maxlength="2000" rows="1" :disabled="running" aria-label="任务目标" placeholder="输入你的问题或任务，也可以接着上一次回答追问…" @keydown="handleComposerKeydown"></textarea>
@@ -277,9 +361,10 @@ onUnmounted(() => window.removeEventListener('resize', resizeComposer));
         </div>
       </form>
     </section>
-    <aside class="task-panel" aria-label="任务详情" :aria-busy="running">
+    <aside class="task-panel" aria-label="任务详情">
+      <div class="task-panel-content" :aria-busy="running">
       <div class="task-panel-heading"><h2>任务详情</h2><span class="badge">{{ modeLabel }}</span></div>
-      <div v-if="running" class="task-empty" role="status"><span class="status-dot"></span>正在执行任务<p class="hint">执行结束后展示协作 Agent 和实际工具调用记录。</p></div>
+      <div v-if="running" class="task-empty" role="status"><span class="status-dot"></span>{{ activeTask?.approval ? '等待你确认操作' : '正在执行任务' }}<p class="hint">{{ activeTask?.approval ? '请在右下方确认本次操作。' : '执行结束后展示协作 Agent 和实际工具调用记录。' }}</p></div>
       <div v-else-if="!result" class="task-empty"><p>暂无执行记录</p><p class="hint">发送任务后，在这里查看协作分工、知识库检索和网页搜索等工具调用。</p><p v-if="conversationHistory.length" class="hint">历史会话暂未提供执行详情，请发送新任务查看。</p></div>
         <div v-if="result" class="execution-footer"><h2>{{ labels[result.status] || result.status }}</h2><p v-if="result.stopReason" class="error">{{ result.stopReason }}</p><div v-if="result.answer && !conversationHistory.length" class="react-answer">{{ result.answer }}</div><p class="run-usage" data-testid="run-token-summary">本次执行：{{ tokenCount(result.tokenUsage?.totalTokens) }} Token · {{ result.toolCalls }} 次工具调用 · {{ result.durationMs }}ms<span v-if="result.tokenUsage?.reportedModelCalls && !result.tokenUsage.complete">（Token 为部分统计）</span></p><div class="execution-details">
         <template v-if="result">
@@ -308,6 +393,26 @@ onUnmounted(() => window.removeEventListener('resize', resizeComposer));
 
 <div class="detail-section"><h2>本次执行</h2><dl><dt>状态</dt><dd>{{ labels[result.status] }}</dd><dt>模型调用</dt><dd>{{ result.modelCalls }} 次</dd><dt>工具调用</dt><dd>{{ result.toolCalls }} 次</dd><dt>总耗时</dt><dd>{{ result.durationMs }}ms</dd><dt>输入 Token</dt><dd>{{ tokenCount(result.tokenUsage?.inputTokens) }}</dd><dt>输出 Token</dt><dd>{{ tokenCount(result.tokenUsage?.outputTokens) }}</dd><dt>总 Token</dt><dd>{{ tokenCount(result.tokenUsage?.totalTokens) }}</dd></dl><p class="hint" data-testid="token-usage-status">{{ !result.modelCalls ? '未调用模型' : !result.tokenUsage?.reportedModelCalls ? '模型服务未返回 Token 用量' : result.tokenUsage.complete ? 'Token 用量统计完整' : 'Token 用量为部分统计，可能低于实际消耗' }}<template v-if="result.modelCalls && result.tokenUsage?.reportedModelCalls"> · 已报告 {{ result.tokenUsage.reportedModelCalls }}/{{ result.modelCalls }} 次调用</template></p><p class="hint">执行编号：{{ result.runId }}</p>
       </div></div></div>
+      </div>
+      <section v-if="activeTask?.approval" class="approval-card" role="region" aria-label="需要你审批的操作">
+        <h3><span class="approval-icon" aria-hidden="true">!</span>需要你的审批</h3>
+        <p class="approval-reason">{{ activeTask.approval.reason }}</p>
+        <dl class="approval-summary">
+          <dt>操作</dt><dd :title="activeTask.approval.toolName">{{ toolLabels[activeTask.approval.toolName] || activeTask.approval.toolName }}</dd>
+          <template v-if="approvalTarget"><dt>目标</dt><dd :title="approvalTarget">{{ approvalTarget }}</dd></template>
+        </dl>
+        <div v-if="approvalExpanded" id="approval-operation-details" class="approval-details">
+          <p>{{ activeTask.approval.reason }}</p>
+          <p>工具：{{ activeTask.approval.toolName }}</p>
+          <pre>{{ activeTask.approval.arguments }}</pre>
+        </div>
+        <p class="approval-note">批准后继续执行，拒绝则停止任务 · 5分钟内处理</p>
+        <div class="approval-actions">
+          <button type="button" class="approval-detail-button" :aria-expanded="approvalExpanded" aria-controls="approval-operation-details" @click="approvalExpanded = !approvalExpanded">{{ approvalExpanded ? '收起详情' : '查看详情' }}</button>
+          <button type="button" class="primary" aria-label="同意并继续" :disabled="deciding" @click="decideApproval(true)">批准</button>
+          <button type="button" class="approval-reject-button" aria-label="拒绝并停止" :disabled="deciding" @click="decideApproval(false)">拒绝</button>
+        </div>
+      </section>
     </aside>
   </div></div>
 </template>
@@ -434,11 +539,33 @@ dl { display:grid; grid-template-columns:1fr 1fr; gap:16px 10px; font-size:13px;
 .recent-row:focus-within .conversation-menu summary,
 .conversation-menu[open] summary { opacity:1; pointer-events:auto; }
 @media (hover:none) { .conversation-menu summary { opacity:1; pointer-events:auto; } }
+.conversation-dialog { position:fixed; inset:0; margin:auto; width:min(440px,calc(100vw - 32px)); max-height:calc(100dvh - 32px); overflow:auto; box-sizing:border-box; border:1px solid #e5eaf2; border-radius:14px; padding:24px; background:white; color:#263853; box-shadow:0 16px 64px #17233d33; }
+.conversation-dialog::backdrop { background:#17233d66; }
+.conversation-dialog h2 { margin:0 0 14px; font-size:18px; }
+.conversation-dialog p { margin:0; line-height:1.7; overflow-wrap:anywhere; }
+.conversation-dialog-actions { display:flex; justify-content:flex-end; gap:12px; margin-top:24px; }
+.conversation-confirm { background:#c43d3d; color:white; border:1px solid #c43d3d; border-radius:8px; padding:9px 16px; cursor:pointer; }
 </style>
 
 <style scoped>
 .chat-layout { gap:0; }
-.task-panel { flex:0 0 330px; width:330px; min-width:0; min-height:0; overflow-y:auto; padding:24px 20px; border-left:1px solid #e8edf5; background:#fff; overscroll-behavior:contain; }
+.task-panel { display:flex; flex-direction:column; flex:0 0 330px; width:330px; min-width:0; min-height:0; overflow:hidden; padding:24px 20px; border-left:1px solid #e8edf5; background:#fff; overscroll-behavior:contain; }
+.task-panel-content { flex:1; min-height:0; overflow-y:auto; }
+.approval-card { flex-shrink:0; max-height:calc(100dvh - 100px); overflow-y:auto; margin-top:12px; padding:12px; border:1px solid #ffe0a1; border-radius:9px; background:linear-gradient(135deg,#fff9ea,#fffdf5); font-size:12px; }
+.approval-card h3 { display:flex; align-items:center; gap:7px; margin:0 0 8px; color:#b56b08; font-size:14px; line-height:20px; }
+.approval-icon { display:inline-flex; align-items:center; justify-content:center; width:17px; height:17px; border-radius:50%; background:#f5a400; color:white; font-size:12px; }
+.approval-reason { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; margin:0 0 8px; color:#697386; line-height:1.5; overflow-wrap:anywhere; }
+.approval-summary { display:grid; grid-template-columns:32px minmax(0,1fr); gap:5px 8px; margin:0; line-height:1.5; }
+.approval-summary dt { color:#8590a5; }
+.approval-summary dd { margin:0; color:#37445e; text-align:left; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.approval-note { margin:9px 0; color:#8991a1; font-size:10px; line-height:1.5; }
+.approval-actions { display:grid; grid-template-columns:1.2fr 1fr 1fr; gap:7px; }
+.approval-actions button { min-width:0; padding:7px 4px; border-radius:6px; font-size:12px; line-height:17px; }
+.approval-detail-button { background:#fff; border:1px solid #e4e9f2; color:#37445e; }
+.approval-reject-button { background:#fff; border:1px solid #f0b1b1; color:#c94b4b; }
+.approval-details { max-height:160px; overflow:auto; margin-top:10px; padding:8px; border:1px solid #f4e4c2; border-radius:6px; background:#ffffffa6; color:#697386; overflow-wrap:anywhere; }
+.approval-details p { margin:0 0 6px; line-height:1.5; }
+.task-panel .approval-details pre { margin:0; padding:0; max-height:none; background:transparent; white-space:pre-wrap; overflow-wrap:anywhere; font-size:11px; }
 .task-panel-heading { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:18px; }
 .task-panel-heading h2 { font-size:18px; margin:0; }
 .task-panel-heading > .badge { font-size:10px; background:#eef3ff; color:#3567f6; }
@@ -460,4 +587,5 @@ dl { display:grid; grid-template-columns:1fr 1fr; gap:16px 10px; font-size:13px;
 .task-panel pre,.task-panel .react-observation { max-height:260px; overflow:auto; font-size:12px; }
 @media(max-width:1100px) { .task-panel { flex-basis:290px; width:290px; padding:20px 16px; } .react-examples { flex-wrap:wrap; } }
 @media(max-width:800px) { .chat-layout { flex-direction:column; overflow-y:auto; } .chat-panel { flex:none; min-height:560px; } .chat-thread { min-height:260px; max-height:55vh; } .task-panel { flex:none; width:100%; overflow:visible; border-left:0; border-top:1px solid #e8edf5; } }
+@media(max-width:800px) { .approval-card { position:fixed; z-index:30; right:12px; bottom:12px; width:min(330px,calc(100vw - 24px)); margin:0; box-shadow:0 6px 24px #19253d14; } }
 </style>

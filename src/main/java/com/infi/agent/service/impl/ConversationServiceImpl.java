@@ -1,8 +1,8 @@
 package com.infi.agent.service.impl;
 
-import com.infi.agent.config.ChatMemoryProperties;
+import com.infi.agent.approval.HumanApprovalContext;
 import com.infi.agent.common.BusinessException;
-import org.springframework.http.HttpStatus;
+import com.infi.agent.config.ChatMemoryProperties;
 import com.infi.agent.config.MultiAgentProperties;
 import com.infi.agent.config.ReactProperties;
 import com.infi.agent.dto.MultiAgentRunDTO;
@@ -24,6 +24,7 @@ import dev.langchain4j.memory.chat.MessageWindowChatMemory;
 import java.time.Duration;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 /** 三种模式统一复用LangChain4j会话窗口，数据库事务不包含模型调用。 */
@@ -174,6 +175,7 @@ public class ConversationServiceImpl implements ConversationService {
         }
         Duration timeout = reactProperties.getTaskTimeout().compareTo(multiProperties.getTaskTimeout()) > 0
                 ? reactProperties.getTaskTimeout() : multiProperties.getTaskTimeout();
-        return persistence.claim(userId, id, timeout.plusSeconds(60));
+        Duration approvalWait = HumanApprovalContext.active() ? HumanApprovalContext.MAX_TOTAL_WAIT : Duration.ZERO;
+        return persistence.claim(userId, id, timeout.plusSeconds(60).plus(approvalWait));
     }
 }

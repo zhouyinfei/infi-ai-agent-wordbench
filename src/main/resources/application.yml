@@ -83,6 +83,16 @@ app:
           - calculator
           - current_time
   tools:
+    mail:
+      enabled: ${MAIL_ENABLED:true}
+      host: ${MAIL_HOST:smtp.qq.com}
+      port: ${MAIL_PORT:465}
+      username: ${MAIL_USERNAME:493589280@qq.com}
+      password: ${MAIL_PASSWORD:}
+      from: ${MAIL_FROM:493589280@qq.com}
+      auth: ${MAIL_AUTH:true}
+      ssl: ${MAIL_SSL:true}
+      starttls: ${MAIL_STARTTLS:false}
     search:
       enabled: ${TOOL_SEARCH_ENABLED:true}
       api-key: ${TAVILY_API_KEY:}

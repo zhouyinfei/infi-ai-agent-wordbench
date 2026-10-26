@@ -66,6 +66,13 @@ export const multiAgentApi = {
   run: (data) => request('/multi-agent/runs', { method: 'POST', body: JSON.stringify(data) }),
 };
 
+export const agentTaskApi = {
+  submit: (data) => request('/agent-tasks', { method: 'POST', body: JSON.stringify(data) }),
+  get: (id) => request('/agent-tasks/' + encodeURIComponent(id)),
+  active: () => request('/agent-tasks'),
+  decide: (id, data) => request('/agent-tasks/' + encodeURIComponent(id) + '/decision', { method: 'POST', body: JSON.stringify(data) }),
+};
+
 
 export const conversationApi = {
   rename: (id, title) => request('/conversations/' + id, { method: 'PATCH', body: JSON.stringify({ title }) }),

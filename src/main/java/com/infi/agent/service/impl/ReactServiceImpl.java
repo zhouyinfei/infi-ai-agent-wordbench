@@ -1,14 +1,14 @@
 package com.infi.agent.service.impl;
 
-import com.infi.agent.react.model.ModelCatalog;
-import com.infi.agent.react.tool.KnowledgeSearchScope;
-
+import com.infi.agent.approval.HumanApprovalContext;
 import com.infi.agent.common.BusinessException;
 import com.infi.agent.config.AiModelProperties;
 import com.infi.agent.config.ReactProperties;
 import com.infi.agent.dto.ReactRunDTO;
+import com.infi.agent.react.model.ModelCatalog;
 import com.infi.agent.react.model.ReactModelGateway;
 import com.infi.agent.react.model.TokenUsageTracker;
+import com.infi.agent.react.tool.KnowledgeSearchScope;
 import com.infi.agent.react.tool.ReactToolRegistry;
 import com.infi.agent.service.ReactService;
 import com.infi.agent.vo.ReactConfigVO;
@@ -105,16 +105,17 @@ public class ReactServiceImpl implements ReactService {
         RunState state = new RunState();
         state.knowledgeScope = toolRegistry.newKnowledgeScope(request.useKnowledge(), request.useNetwork());
         List<ChatMessage> messages = new ArrayList<>();
-        messages.add(SystemMessage.from(SYSTEM_PROMPT + "\n" + state.knowledgeScope.selectionInstruction()));
+        messages.add(SystemMessage.from(SYSTEM_PROMPT + "\n" + HumanApprovalContext.instruction()
+                + "\n" + state.knowledgeScope.selectionInstruction()));
         messages.addAll(history);
         messages.add(UserMessage.from(request.goal().trim()));
         Map<String, Integer> repetitions = new HashMap<>();
         for (int iteration = 1; iteration <= properties.getMaxIterations(); iteration++) {
-            Duration remaining = taskTimeout.minusNanos(System.nanoTime() - state.started);
+            Duration remaining = taskTimeout.minusNanos(HumanApprovalContext.nanoTime() - state.started);
             if (remaining.isNegative() || remaining.toMillis() < 1) {
                 return finish(userId, state, "TIMEOUT", null, "任务超过执行时限");
             }
-            long modelStarted = System.nanoTime();
+            long modelStarted = HumanApprovalContext.nanoTime();
             state.modelCalls++;
             ChatResponse response;
             try {
@@ -173,7 +174,7 @@ public class ReactServiceImpl implements ReactService {
             List<ReactToolRegistry.TimedObservation> observations;
             try {
                 observations = toolRegistry.executeBatch(calls, state.knowledgeScope,
-                        taskTimeout.minusNanos(System.nanoTime() - state.started));
+                        taskTimeout.minusNanos(HumanApprovalContext.nanoTime() - state.started));
             } catch (ReactToolRegistry.BatchExecutionException exception) {
                 return finish(userId, state, exception.status(), null, exception.getMessage());
             }
@@ -210,7 +211,8 @@ public class ReactServiceImpl implements ReactService {
         log.info("ReAct completed, userId={}, runId={}, status={}, modelCalls={}, toolCalls={}",
                 userId, state.runId, status, state.modelCalls, state.toolCalls);
         return new ReactRunVO(state.runId, status, answer, reason, state.modelCalls,
-                state.toolCalls, elapsed(state.started), List.copyOf(state.steps), state.tokenUsage.snapshot(state.modelCalls));
+                state.toolCalls, elapsed(state.started), HumanApprovalContext.withApprovalSteps(state.steps),
+                state.tokenUsage.snapshot(state.modelCalls));
     }
 
     /**
@@ -220,12 +222,12 @@ public class ReactServiceImpl implements ReactService {
      * @return 已过去的毫秒数
      */
     private static long elapsed(long started) {
-        return Duration.ofNanos(System.nanoTime() - started).toMillis();
+        return Duration.ofNanos(HumanApprovalContext.nanoTime() - started).toMillis();
     }
 
     private static class RunState {
         private final String runId = com.infi.agent.common.ExecutionLogs.runId();
-        private final long started = System.nanoTime();
+        private final long started = HumanApprovalContext.nanoTime();
         private final List<ReactStepVO> steps = new ArrayList<>();
         private final TokenUsageTracker tokenUsage = new TokenUsageTracker();
         private KnowledgeSearchScope knowledgeScope;

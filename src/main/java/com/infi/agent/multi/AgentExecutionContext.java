@@ -1,5 +1,6 @@
 package com.infi.agent.multi;
 
+import com.infi.agent.approval.HumanApprovalContext;
 import com.infi.agent.react.tool.KnowledgeSearchScope;
 import com.infi.agent.config.MultiAgentProperties;
 import com.infi.agent.react.model.TokenUsageTracker;
@@ -18,7 +19,7 @@ import java.util.UUID;
 public class AgentExecutionContext {
     private final KnowledgeSearchScope knowledgeScope;
     private final String runId = com.infi.agent.common.ExecutionLogs.runId();
-    private final long started = System.nanoTime();
+    private final long started = HumanApprovalContext.nanoTime();
     private final Duration timeout;
     private final int maxModelCalls;
     private final int maxToolCalls;
@@ -63,7 +64,7 @@ public class AgentExecutionContext {
 
     /** @return 当前截止时间内的剩余时长，超时则停止 */
     public Duration remaining() {
-        Duration left = timeout.minusNanos(System.nanoTime() - started);
+        Duration left = timeout.minusNanos(HumanApprovalContext.nanoTime() - started);
         if (left.isNegative() || left.toMillis() < 1) {
             throw new AgentExecutionException("TIMEOUT", "任务超过执行时限");
         }
@@ -137,6 +138,7 @@ public class AgentExecutionContext {
      */
     public ReactRunVO finish(String status, String answer, String reason) {
         return new ReactRunVO(runId, status, answer, reason, modelCalls, toolCalls,
-                Duration.ofNanos(System.nanoTime() - started).toMillis(), List.copyOf(steps), usage.snapshot(modelCalls));
+                Duration.ofNanos(HumanApprovalContext.nanoTime() - started).toMillis(),
+                HumanApprovalContext.withApprovalSteps(steps), usage.snapshot(modelCalls));
     }
 }
